@@ -38,7 +38,8 @@ jobs:
         run: |
           echo "$SHELL_KEYSTORE_BASE64" | base64 -d > /tmp/shell.keystore
           echo "SHELL_KEYSTORE_FILE=/tmp/shell.keystore" >> "$GITHUB_ENV"
-
+      - name: Use Float website launcher icon
+        run: cp public/icon-512.png android-shell/app/src/main/res/drawable/appicon.png
       - name: Build APKs
         run: gradle -p android-shell assembleDebug assembleRelease
 
