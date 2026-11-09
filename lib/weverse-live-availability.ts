@@ -23,7 +23,7 @@ export function weverseLiveAvailability(characterId: string, at = Date.now(), cu
     if((item.busyLevel??(item.source==="manual"?1:3))>=4 || /驾驶|手术|考试|拍摄|录制|演出|会议/.test(item.title))return {free:false,reason:"当前有其他安排，暂时无法开播"};
   }
   const wvs=loadWeverseState();
-  if(wvs.lives.some(live=>live.id!==currentLiveId&&live.status==="live"&&live.activeCharacterIds.includes(characterId)))return {free:false,reason:"该成员已在另一场 LIVE 中"};
+  if(wvs.lives.some(live=>!live.official&&live.id!==currentLiveId&&live.status==="live"&&live.activeCharacterIds.includes(characterId)))return {free:false,reason:"该成员已在另一场 Live 中"};
   return {free:true,reason:"",scheduledTheme};
 }
 /** A refresh is an opportunity, not a fixed broadcast timetable or repeated reroll. */

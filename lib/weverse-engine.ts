@@ -121,7 +121,7 @@ function parseMediaIntent(value: unknown): WeverseMediaIntent | undefined {
 
 async function resolveCharacterGeneration(characterId: string, community: WeverseCommunity, options?: { now?: Date; historical?: boolean }): Promise<ResolvedGeneration> {
   const character = loadCharacters().find((item) => item.id === characterId);
-  if (!character) throw new ChatEngineError("找不到要生成 WVS 内容的角色。");
+  if (!character) throw new ChatEngineError("找不到要生成 Weverse 内容的角色。");
 
   const bindings = loadBindingConfig();
   const slot = resolveBinding(bindings, character.id, "weverse");
@@ -219,7 +219,7 @@ export async function generateWeverseArtistPost(characterId: string, community: 
   if (!options?.historical) recordMediaDecision("weverse", characterId, Boolean(photoDescription), photoDescription);
   const mediaIntent = parseMediaIntent(parsed?.mediaIntent);
   const postType: "text" | "voice" = parsed?.postType === "voice" ? "voice" : "text";
-  if (!original && !translated) throw new ChatEngineError("这次没有生成有效 WVS 内容，请重试。");
+  if (!original && !translated) throw new ChatEngineError("这次没有生成有效 Weverse 内容，请重试。");
   return {
     postType,
     original: original || translated,
@@ -263,7 +263,7 @@ function officialMediaContext(community: WeverseCommunity): string {
 }
 
 async function resolveCommunityApi(community: WeverseCommunity): Promise<{ apiConfig: ApiConfig; preset: PresetConfig | null; regexes: RegexConfig[] }> {
-  const firstMemberId = community.memberCharacterIds[0];
+  const firstMemberId = community.memberCharacterIds.find(id => !id.startsWith("user:"));
   const bindings = loadBindingConfig();
   const slot = firstMemberId ? resolveBinding(bindings, firstMemberId, "weverse") : undefined;
   const apiConfig = loadApiConfigs().find((item) => item.id === slot?.apiConfigId) ?? loadApiConfigs()[0];
@@ -421,7 +421,7 @@ export async function generateWeverseFanBatch(
   options?: { activity?: WeverseSettings["fanActivity"]; includePosts?: boolean; targetPost?: WeversePost; now?: Date; historical?: boolean },
 ): Promise<{ posts: GeneratedWeverseFanPost[]; comments: GeneratedWeverseFanComment[] }> {
   const resolved = await resolveCommunityApi(community);
-  const memberNames = community.memberCharacterIds.map((id) => loadCharacters().find((item) => item.id === id)?.name).filter(Boolean).join("、");
+  const memberNames = community.memberCharacterIds.map(id => liveMemberName(community, id)).join("、");
   const counts = activityCounts(options?.activity || "normal");
   const includePosts = options?.includePosts !== false;
   const targetPost = options?.targetPost;
@@ -547,14 +547,19 @@ export async function generateWeverseScheduleBatch(
   const resolved = await resolveCommunityApi(community);
   const now = options?.now ?? new Date();
   const identity = community.userIdentityId ? resolveUserIdentity(undefined,"weverse") : null;
-  const characters = community.userIdentityId ? [{id:`user:${community.userIdentityId}`,name:identity?.name || community.name,persona:identity?.bio || community.description || "",timeZone:getSystemTimeZone()}] : loadCharacters().filter((item) => community.memberCharacterIds.includes(item.id));
+  const characters: Array<{id: string; name: string; persona?: string; timeZone?: string}> = loadCharacters().filter(item => community.memberCharacterIds.includes(item.id));
+  if (community.userIdentityId) {
+    const id = `user:${community.userIdentityId}`;
+    const profile = community.memberProfiles[id];
+    characters.push({ id, name: profile?.displayName || (identity?.id === community.userIdentityId ? identity.name : community.name), persona: profile?.bio || "", timeZone: getSystemTimeZone() });
+  }
   const memberRows = characters.map((item) => `${item.id} = ${item.name}：${(item.persona||"").slice(0,1200)}`).join("\n").slice(0,6000);
   const existingRows = existing
     .filter((item) => item.communityId === community.id)
     .sort((a,b) => a.startsAt-b.startsAt)
     .slice(-24)
     .map((item) => `${new Date(item.startsAt).toISOString()} | ${item.type} | ${item.title}${item.contentDescription ? `｜内容底稿：${item.contentDescription}` : ""} | members=${item.memberCharacterIds.join(",")}`)
-    .join("\n") || "暂无 WVS Schedule 条目。";
+    .join("\n") || "暂无 Weverse Schedule 条目。";
   const messages: LLMMessage[] = [
     {
       role: "system",
@@ -567,7 +572,7 @@ export async function generateWeverseScheduleBatch(
         "分类：performance舞台/活动，brand品牌/时尚活动，media节目播出/幕后/采访公开，release作品/预告/专辑发布，anniversary纪念节点。visibility统一public。",
         "实际参加的工作calendarSync=true，安排合理准备与通勤，并参考已有占用时段；上线或播出节点calendarSync=false。busyLevel按手机可用程度填1随时回复、2短暂回复、3忙时等待、4无法看手机；发布节点填1。内部工作和私人生活由手机日历管理。",
         worldlineContextForApp("weverse", {publicEvents:true}).slice(0,2400),
-        `现有 WVS Schedule：\n${existingRows}`,
+        `现有 Weverse Schedule：\n${existingRows}`,
         `成员手机日历参考：\n${communityCalendarContext(community, now)}`,
         "memberCharacterIds 只能使用上面提供的真实 ID；团体共同活动可填多个。",
         `只输出 JSON，不要 Markdown。格式：{"items":[{"visibility":"public","type":"performance","title":"...","contentDescription":"一两句具体看点","publicAt":"","date":"YYYY-MM-DD","startTime":"HH:MM","endTime":"HH:MM","location":"...或空","memberCharacterIds":["真实ID"],"calendarSync":true,"busyLevel":3}]}。只返回有依据的具体事项。`,
@@ -704,14 +709,16 @@ function normalizeCharacterIds(value: unknown, validIds: Set<string>, options?: 
 
 function liveMemberName(community: WeverseCommunity, characterId: string): string {
   const character = loadCharacters().find((item) => item.id === characterId);
-  return community.memberProfiles[characterId]?.displayName?.trim() || character?.name || characterId;
+  const identity = characterId.startsWith("user:") ? resolveUserIdentity(undefined, "weverse") ?? resolveUserIdentity() : null;
+  const publicUserName = identity && `user:${identity.id}` === characterId ? identity.name : "共同社区艺人";
+  return community.memberProfiles[characterId]?.displayName?.trim() || character?.name || (characterId.startsWith("user:") ? publicUserName : characterId);
 }
 
 function liveCommunityRosterContext(community: WeverseCommunity): string {
   const all = loadCharacters();
   const rows = community.memberCharacterIds.map((characterId) => {
     const character = all.find((item) => item.id === characterId);
-    const name = community.memberProfiles[characterId]?.displayName?.trim() || character?.name || characterId;
+    const name = liveMemberName(community, characterId);
     const brief = (character?.briefPersona || character?.personality || character?.persona || "").replace(/\s+/g, " ").trim().slice(0, 700);
     return `- ${characterId} | ${name}${brief ? ` | ${brief}` : ""}`;
   });
@@ -721,7 +728,7 @@ function liveCommunityRosterContext(community: WeverseCommunity): string {
 function liveTranscriptContext(live: WeverseLive, community: WeverseCommunity): string {
   const segments = [...live.segments].sort((a, b) => a.createdAt - b.createdAt).slice(-18).map((segment) => {
     const kind = segment.kind === "action" ? "动作" : segment.kind === "system" ? "系统" : "发言";
-    const who = segment.characterId ? liveMemberName(community, segment.characterId) : "LIVE";
+    const who = segment.characterId ? liveMemberName(community, segment.characterId) : "Live";
     return `${kind}[${who}]: ${segment.original}${segment.translated ? ` / ${segment.translated}` : ""}`;
   });
   const comments = [...live.comments].sort((a, b) => a.createdAt - b.createdAt).slice(-24).map((comment) => {
@@ -739,7 +746,7 @@ async function publicLiveComments(community:WeverseCommunity, visible:string, co
 
 function liveFormatRules(opening = false, liveType: "visual" | "voice" | "auto" = "visual"): string[] {
   return [
-    "这是 Weverse 的成员私人 LIVE，不是私聊，也不是正式节目主持。角色可以随意聊天、吃饭、推荐歌、等人进来、发呆、准备工作或睡前陪粉丝一会儿。",
+    "这是 Weverse 的成员私人 Live，不是私聊，也不是正式节目主持。角色可以随意聊天、吃饭、推荐歌、等人进来、发呆、准备工作或睡前陪粉丝一会儿。",
     "直播持续多久完全按角色人设与当次情境决定：有人会黏很久，有人活动后台只匆匆播几分钟。不要预设固定轮数。",
     opening
       ? "现在是刚开播阶段。通常先调一下状态、等观众陆续进来、随口说几句；不要一开场就进入高强度问答或大型节目。"
@@ -748,7 +755,7 @@ function liveFormatRules(opening = false, liveType: "visual" | "voice" | "auto" 
       ? "这是 Voice Live：前台只有渐变语音舞台、成员头像、当前发言文字气泡与评论，不展示画面环境。所有 segment 必须为 speech，绝对不要输出 action 或任何动作/画面描写。"
       : liveType === "auto"
         ? "本场类型尚未指定。请按角色当时状态自然选择 Video Live（visual）或 Voice Live（voice）；若选择 voice，所有 segment 必须为 speech，绝对不要输出 action 或画面描写。"
-        : "这是 Video Live，使用横屏 LIVE Stage。不要讨论竖屏模板，也不要描述真实视频文件、编码、清晰度等技术细节。",
+        : "这是 Video Live，使用横屏 Live Stage。不要讨论竖屏模板，也不要描述真实视频文件、编码、清晰度等技术细节。",
     "speech 使用该角色本人最自然的语言；若不是简体中文，同时给出简体中文 translated。",
     liveType === "voice" ? "Voice Live 不输出动作。" : "visual 模式下 action 不是必填：只有角色真的发生了新的动作、姿态变化或环境操作时才输出；动作没变化就完全省略，禁止为了凑格式硬写。action 使用省略主语的现场描写，不写‘他/她/角色/姓名……’这类第三人称主语，不加括号，只写简体中文、不做双语。",
     `粉丝留言要像真实直播间：在线人数远高于活跃发言人数，观众里可以有核心粉丝、普通关注者和路人。${fanLanguageRules(loadWeverseState().settings.fanLanguagePreset)[0]}不要人人都像资深粉丝。`,
@@ -791,10 +798,10 @@ export async function generateWeverseLiveOpening(
           "只输出 JSON，不要 Markdown。格式：{\"liveType\":\"visual或voice\",\"title\":\"...\",\"segments\":[{\"kind\":\"speech\",\"characterId\":\"角色ID\",\"original\":\"角色原话\",\"translated\":\"中文翻译\"}],\"comments\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\"}],\"shouldEnd\":false}",
         ].join("\n"),
       },
-      { role: "user", content: theme ? `现在按这个主题开一场 LIVE：${theme}` : "现在自然地开一场 Weverse LIVE。" },
+      { role: "user", content: theme ? `现在按这个主题开一场 Live：${theme}` : "现在自然地开一场 Weverse Live。" },
     ],
     resolved.regexes,
-    { characterName: `Weverse LIVE:${resolved.character.name}`, userName: resolved.userName },
+    { characterName: `Weverse Live:${resolved.character.name}`, userName: resolved.userName },
     { appId: "weverse", appTags: ["weverse", "live"], skipOutputRegex: true },
   );
   const parsed = extractJsonObject(raw);
@@ -803,8 +810,8 @@ export async function generateWeverseLiveOpening(
   const allowed = new Set([characterId]);
   const segments = normalizeLiveSegments(parsed?.segments, allowed, characterId).filter((segment) => liveType === "visual" || segment.kind === "speech");
   const comments = await publicLiveComments(community, segments.map(s=>s.original).join("\n"),14).catch(()=>[]);
-  const title = String(parsed?.title ?? "").trim() || `${resolved.character.name} LIVE`;
-  if (!segments.length) throw new ChatEngineError("这次没有生成有效 LIVE 开场，请重试。");
+  const title = String(parsed?.title ?? "").trim() || `${resolved.character.name} Live`;
+  if (!segments.length) throw new ChatEngineError("这次没有生成有效 Live 开场，请重试。");
   return { liveType, title, segments, comments, artistComments: [], viewerJoins: [], viewerLeaves: [], participantJoins: [], participantLeaves: [], shouldEnd: false };
 }
 
@@ -817,11 +824,13 @@ export async function generateWeverseLiveContinuation(
   const now = options?.now ?? new Date();
   const resolved = await resolveCharacterGeneration(characterId, community, { now });
   const userComments = (options?.userComments || []).map((item) => item.trim()).filter(Boolean).slice(0, 12);
-  const validCommunityIds = new Set(community.memberCharacterIds);
+  const validCommunityIds = new Set(community.memberCharacterIds.filter(id => !id.startsWith("user:")));
   const currentActiveIds = new Set((live.activeCharacterIds?.length ? live.activeCharacterIds : [characterId]).filter((id) => validCommunityIds.has(id)));
   currentActiveIds.add(characterId);
   const currentViewerIds = new Set(live.viewerPresence.filter((item) => !item.leftAt && validCommunityIds.has(item.characterId) && !currentActiveIds.has(item.characterId)).map((item) => item.characterId));
   const activeLabel = [...currentActiveIds].map((id) => `${id}(${liveMemberName(community, id)})`).join("、") || `${characterId}(${resolved.character.name})`;
+  const userOnStage = live.activeCharacterIds.filter(id => id.startsWith("user:")).map(id => liveMemberName(community, id)).join("、");
+  const userHosted = live.hostCharacterIds[0]?.startsWith("user:");
   const viewerLabel = [...currentViewerIds].map((id) => `${id}(${liveMemberName(community, id)})`).join("、") || "无";
   const raw = await sendLLMRequest(
     resolved.apiConfig,
@@ -833,10 +842,12 @@ export async function generateWeverseLiveContinuation(
         content: [
           ...liveFormatRules(false, live.liveType),
           (community.memberProfiles[characterId]?.liveStyle || community.liveStyle) ? `直播风格：${(community.memberProfiles[characterId]?.liveStyle || community.liveStyle || "").slice(0,6000)}` : "",
-          `本场 LIVE 标题：${live.title}`,
+          `本场 Live 标题：${live.title}`,
           live.theme ? `最初的软主题：${live.theme}` : "本场没有预设主题。",
           `这已经是第 ${Math.max(1, live.roundCount + 1)} 段推进。`,
           `当前正在 Stage 连线中的角色：${activeLabel}。`,
+          userOnStage ? `由用户亲自扮演的台上艺人：${userOnStage}。只回应其已经公开发送的发言和动作，严禁代写其台词、动作、加入或离开。` : "",
+          userHosted ? "本场由用户主持。你负责角色发言和动作，是否结束整场由用户决定，shouldEnd 必须为 false。" : "",
           `当前作为普通艺人观众围观、但没有连线的角色：${viewerLabel}。`,
           "只有同一个 Community 的成员才允许围观、发艺人评论或加入连线；严禁引入其他 Community 的角色。",
           "同 Community 成员清单如下。characterId 必须严格从这些 ID 中选择；简略人设仅用于避免明显 OOC：",
@@ -847,7 +858,7 @@ export async function generateWeverseLiveContinuation(
           "允许普通围观艺人随后被主播邀请或自己接入连线：把角色 ID 放进 participantJoins；加入后该角色本轮即可在 segments 里说话。也允许已连线的非最初开播者中途离开，放进 participantLeaves。最初开播者若要离开，应直接 shouldEnd=true，而不是 participantLeaves。",
           live.liveType === "voice" ? "如果 participantJoins 发生，仍然留在同一个语音 Stage，以成员头像和每段 characterId 区分；不要生成动作。" : "如果 participantJoins 发生，不需要视频分屏描述；仍然是同一个文字 Live Stage。多人 Stage 里不要机械轮流说话，谁说几句、谁沉默都按现场自然发生。",
           liveTranscriptContext(live, community),
-          userComments.length ? `用户自上次推进后已经公开发到直播间的评论如下。它们来自同一个普通观众，但你不必逐条回应：\n${userComments.map((item, index) => `${index + 1}. ${item}`).join("\n")}` : "用户这一轮没有新的公开评论，只是在继续观看。",
+          userComments.length ? `用户自上次推进后已经公开发到直播间的评论如下。可能带有共同社区艺人的公开署名，你不必逐条回应：\n${userComments.map((item, index) => `${index + 1}. ${item}`).join("\n")}` : "用户这一轮没有新的公开评论，只是在继续观看。",
           "生成接下来的 2~5 个短 segment 和 7~12 条新普通观众留言。以说话为主；只有确实有新动作时才生成 action。",
           "每个 segment 必须尽量提供 characterId。speech 的 characterId 只能来自当前 Stage 角色或本轮 participantJoins。action 若属于某个角色也给 characterId。",
           "可以生成 0~2 条艺人评论；artistComments 里的角色不能是当前 Stage 角色。主播通常会更容易注意艺人评论并自然回应，但不是强制。",
@@ -855,10 +866,10 @@ export async function generateWeverseLiveContinuation(
           "只输出 JSON，不要 Markdown。格式：{\"segments\":[{\"kind\":\"speech\",\"characterId\":\"角色ID\",\"original\":\"原话\",\"translated\":\"中文\"}],\"comments\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\"}],\"artistComments\":[{\"characterId\":\"同社区角色ID\",\"original\":\"艺人原话\",\"translated\":\"中文\"}],\"viewerJoins\":[\"角色ID\"],\"viewerLeaves\":[\"角色ID\"],\"participantJoins\":[\"角色ID\"],\"participantLeaves\":[\"角色ID\"],\"shouldEnd\":true或false,\"endingReason\":\"可空\"}",
         ].filter(Boolean).join("\n"),
       },
-      { role: "user", content: userComments.length ? "这些评论已经发在直播间里。结合它们和当前现场，继续这一小段 LIVE。" : "继续播放下一小段 LIVE。" },
+      { role: "user", content: userComments.length ? "这些评论已经发在直播间里。结合它们和当前现场，继续这一小段 Live。" : "继续播放下一小段 Live。" },
     ],
     resolved.regexes,
-    { characterName: `Weverse LIVE:${resolved.character.name}`, userName: resolved.userName },
+    { characterName: `Weverse Live:${resolved.character.name}`, userName: resolved.userName },
     { appId: "weverse", appTags: ["weverse", "live"], skipOutputRegex: true },
   );
   const parsed = extractJsonObject(raw);
@@ -876,8 +887,9 @@ export async function generateWeverseLiveContinuation(
   for (const id of participantJoins) viewerPoolForComments.delete(id);
   const viewerLeaves = normalizeCharacterIds(parsed?.viewerLeaves, viewerPoolForComments, { max: 2 });
 
-  const segments = normalizeLiveSegments(parsed?.segments, activeForSegments, primaryHost).filter((segment) => live.liveType === "visual" || segment.kind === "speech");
-  const comments = await publicLiveComments(community, live.segments.map(s=>s.original).slice(-24).join("\n"),12).catch(()=>[]);
+  const suppliedSegments = Array.isArray(parsed?.segments) ? parsed.segments.filter(item => !String(item?.characterId || "").startsWith("user:")) : [];
+  const segments = normalizeLiveSegments(suppliedSegments, activeForSegments, characterId).filter((segment) => live.liveType === "visual" || segment.kind === "speech");
+  const comments = await publicLiveComments(community, live.segments.filter(segment => segment.createdAt <= now.getTime()).map(segment => segment.original).slice(-24).join("\n"),12).catch(()=>[]);
   const artistComments = normalizeLiveArtistComments(parsed?.artistComments, validCommunityIds, activeForSegments)
     .filter((item) => !viewerLeaves.includes(item.characterId))
     .slice(0, 3);
@@ -885,10 +897,10 @@ export async function generateWeverseLiveContinuation(
     if (!currentViewerIds.has(item.characterId) && !viewerJoins.includes(item.characterId)) viewerJoins.push(item.characterId);
   }
 
-  const shouldEnd = parsed?.shouldEnd === true || String(parsed?.shouldEnd).toLowerCase() === "true";
+  const shouldEnd = !userHosted && (parsed?.shouldEnd === true || String(parsed?.shouldEnd).toLowerCase() === "true");
   const endingReason = String(parsed?.endingReason ?? "").trim() || undefined;
   if (!segments.length && !comments.length && !artistComments.length && !participantJoins.length && !participantLeaves.length) {
-    throw new ChatEngineError("这次 LIVE 没有生成新的内容，请重试。");
+    throw new ChatEngineError("这次 Live 没有生成新的内容，请重试。");
   }
   return { segments, comments, artistComments, viewerJoins, viewerLeaves, participantJoins, participantLeaves, shouldEnd, endingReason };
 }

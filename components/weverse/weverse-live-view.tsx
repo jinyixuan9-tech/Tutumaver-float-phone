@@ -1,12 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BadgeCheck, ChevronRight, Heart, LoaderCircle, Play, Send, Square, Volume2, X } from "lucide-react";
+import type { ReactNode } from "react";
+import { BadgeCheck, ChevronRight, Heart, LoaderCircle, Play, Plus, Send, Square, Volume2, X } from "lucide-react";
 import type { WeverseLive } from "@/lib/weverse-storage";
 import {isCallAudioSessionActive, playAudioBlobViaMediaElement, resolveUserVoiceConfig, resolveVoiceConfig, synthesizeSpeech, unlockAudioPlayback } from "@/lib/tts-service";
 import styles from "./weverse-app.module.css";
 
 type Props = {
+  isUserGuest?: boolean;
+  artistViewer?: boolean;
+  onLiveActions?: () => void;
+  onLeaveStage?: () => void;
+  generationFeedback?: ReactNode;
   isUserHost?: boolean; onHostSend?:(text:string,kind:"speech"|"action")=>void;
   live: WeverseLive;
   speakerNames: Record<string, string>;
@@ -51,11 +57,12 @@ function liveElapsed(startedAt: number, endAt: number): string {
   return `${String(min).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
 }
 
-export function WeverseLiveView({ isUserHost,onHostSend, live, speakerNames, speakerAvatars, userName, busy, onBack, onAdvance, onSendComment, onHeart, onFinalizeEnd, onManualEnd }: Props) {
+export function WeverseLiveView({ isUserHost, isUserGuest, artistViewer, onLiveActions, onLeaveStage, generationFeedback, onHostSend, live, speakerNames, speakerAvatars, userName, busy, onBack, onAdvance, onSendComment, onHeart, onFinalizeEnd, onManualEnd }: Props) {
   const [clock, setClock] = useState(() => Date.now());
   const [hostKind,setHostKind]=useState<"speech"|"action">("speech");
   const commentsFollow=useRef(true);
   const [draft, setDraft] = useState("");
+  useEffect(() => { setDraft(""); setHostKind("speech"); }, [isUserHost]);
   const [exitSheetOpen, setExitSheetOpen] = useState(false);
   const [artistCommentsOpen, setArtistCommentsOpen] = useState(false);
   const [transcriptPinned, setTranscriptPinned] = useState(true);
@@ -95,7 +102,7 @@ export function WeverseLiveView({ isUserHost,onHostSend, live, speakerNames, spe
   const visibleArtistComments = useMemo(() => visibleComments.filter((item) => item.authorType === "artist"), [visibleComments]);
   const isVoiceLive = live.liveType === "voice";
   const latestVoiceSegment = useMemo(() => [...visibleSegments].reverse().find((item) => item.kind === "speech"), [visibleSegments]);
-  const displayedVoiceSegment = useMemo(() => visibleSegments.find((item) => item.id === selectedVoiceSegmentId && item.kind === "speech") || latestVoiceSegment, [latestVoiceSegment, selectedVoiceSegmentId, visibleSegments]);
+  const displayedVoiceSegment = useMemo(() => visibleSegments.find((item) => item.id === selectedVoiceSegmentId && item.kind === "speech") || [...visibleSegments].reverse().find(item => item.kind === "action" && item.createdAt > (latestVoiceSegment?.createdAt || 0)) || latestVoiceSegment, [latestVoiceSegment, selectedVoiceSegmentId, visibleSegments]);
   const latestVoiceSystem = useMemo(() => [...visibleSegments].reverse().find((item) => item.kind === "system"), [visibleSegments]);
   const voiceParticipantIds = useMemo(() => {
     const ids = live.status === "live" && live.activeCharacterIds.length ? live.activeCharacterIds : live.hostCharacterIds;
@@ -217,8 +224,9 @@ export function WeverseLiveView({ isUserHost,onHostSend, live, speakerNames, spe
   return (
     <div className={styles.liveRoom}>
       <header className={styles.liveWvsHeader}>
-        <span />
-        <div className={styles.liveWvsStatus}>{live.status === "live" ? <><i /> LIVE</> : "REPLAY"}</div>
+        {onLiveActions ? <button type="button" className={styles.liveActionTrigger} aria-label="合播选项" onClick={onLiveActions}><Plus size={20} /></button>
+          : isUserGuest ? <span className={styles.liveOnStageLabel}>合播中</span> : <span />}
+        <div className={styles.liveWvsStatus}>{live.status === "live" ? <><i /> Live</> : "REPLAY"}</div>
         <button type="button" onClick={() => live.status === "live" ? setExitSheetOpen(true) : onBack()} aria-label="关闭"><X size={25} /></button>
       </header>
 
@@ -230,7 +238,7 @@ export function WeverseLiveView({ isUserHost,onHostSend, live, speakerNames, spe
           </div>
           <div className={styles.voiceLiveFocus}>
             {displayedVoiceSegment ? <div className={styles.voiceLiveBubble}>
-              <b>{displayedVoiceSegment.characterId ? (speakerNames[displayedVoiceSegment.characterId] || displayedVoiceSegment.characterId) : "LIVE"}</b>
+              <b>{displayedVoiceSegment.characterId ? (speakerNames[displayedVoiceSegment.characterId] || displayedVoiceSegment.characterId) : "Live"}</b>
               <p>{displayedVoiceSegment.original}</p>
               {displayedVoiceSegment.translated && displayedVoiceSegment.translated !== displayedVoiceSegment.original ? <small>{displayedVoiceSegment.translated}</small> : null}
             </div> : <div className={styles.voiceLiveBubble}><p>正在连接 Voice Live…</p></div>}
@@ -277,7 +285,7 @@ export function WeverseLiveView({ isUserHost,onHostSend, live, speakerNames, spe
               </div> : <p>{segment.original}</p>}
               {segment.kind === "speech" && segment.translated && segment.translated !== segment.original ? <small className={styles.liveSpeechTranslation}>{segment.translated}</small> : null}
             </div>;
-          }) : <div className={styles.liveConnecting}>正在连接 LIVE…</div>}
+          }) : <div className={styles.liveConnecting}>正在连接 Live…</div>}
         </div>}
         <time className={styles.liveStageTime}>{liveElapsed(live.startedAt, live.status === "ended" && live.endedAt ? live.endedAt : clock)}</time>
         {voiceNotice ? <div className={styles.liveVoiceNotice}>{voiceNotice}</div> : null}
@@ -321,28 +329,31 @@ export function WeverseLiveView({ isUserHost,onHostSend, live, speakerNames, spe
       </div> : null}
 
       <div className={styles.liveBottomPanel}>
-        {live.status === "live" ? <div className={styles.liveComposer}>
+        {live.status === "live" ? <div className={`${styles.liveComposer}${isUserHost ? ` ${styles.liveArtistComposer}` : ""}`}>
           {isUserHost && <button type="button" onClick={()=>setHostKind(k=>k==="speech"?"action":"speech")}>{hostKind==="speech"?"语":"动"}</button>}
           <input
             value={draft}
             disabled={isEnding}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); sendDraft(); } }}
-            placeholder={isUserHost ? (hostKind==="speech"?"说点什么…":"写下动作…") : isEnding ? "角色正在收尾…" : "输入评论，回车发送"}
+            placeholder={isUserHost ? (hostKind==="speech"?"说点什么…":"写下动作…") : isEnding ? "角色正在收尾…" : artistViewer ? "输入艺人评论，回车发送" : "输入评论，回车发送"}
           />
           <button type="button" className={styles.livePlaneButton} onClick={()=>isUserHost && draft.trim() ? sendDraft() : onAdvance()} disabled={isUserHost ? busy : !canAdvance} aria-label={busy ? "生成中" : isPlaying ? "播放中" : "召唤或继续播放"}><Send size={18} /></button>
-          <button type="button" className={styles.liveHeartButton} onClick={tapHeart} aria-label="点赞"><Heart size={20} fill="currentColor" /></button>
-          <div className={styles.liveHeartFloatLayer}>{heartBursts.map((item) => <Heart key={item.id} className={styles.liveHeartFloat} style={{ left: `${item.x}%` }} size={19} fill="currentColor" />)}</div>
-        </div> : <div className={styles.liveEndedBanner}>LIVE 已结束</div>}
+          {!isUserHost && <>
+            <button type="button" className={styles.liveHeartButton} onClick={tapHeart} aria-label="点赞"><Heart size={20} fill="currentColor" /></button>
+            <div className={styles.liveHeartFloatLayer}>{heartBursts.map((item) => <Heart key={item.id} className={styles.liveHeartFloat} style={{ left: `${item.x}%` }} size={19} fill="currentColor" />)}</div>
+          </>}
+        </div> : <div className={styles.liveEndedBanner}>Live 已结束</div>}
       </div>
 
+      {generationFeedback && <div className={styles.liveGenerationFeedback}>{generationFeedback}</div>}
       {exitSheetOpen ? <div className={styles.liveExitMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setExitSheetOpen(false); }}>
         <section className={styles.liveExitSheet}>
           <div className={styles.liveExitHandle} />
           <h3>退出直播？</h3>
-          <p>可以只退出页面并保留后台播放，或者直接关闭本场直播。</p>
-          <button type="button" className={styles.liveExitKeepBtn} onClick={() => { setExitSheetOpen(false); onBack(); }}>仅退出，保留后台播放</button>
-          <button type="button" className={styles.liveExitEndBtn} disabled={busy} onClick={() => { setExitSheetOpen(false); onManualEnd(); }}>关闭直播</button>
+          <p>{isUserGuest ? "退出合播后，主持艺人会继续直播。" : "可以只退出页面并保留后台播放，或者直接结束本场直播。"}</p>
+          <button type="button" className={styles.liveExitKeepBtn} onClick={() => { setExitSheetOpen(false); (isUserGuest ? onLeaveStage : onBack)?.(); }}>{isUserGuest ? "退出合播" : "仅退出，保留后台播放"}</button>
+          {!isUserGuest && <button type="button" className={styles.liveExitEndBtn} disabled={busy} onClick={() => { setExitSheetOpen(false); onManualEnd(); }}>结束直播</button>}
           <button type="button" className={styles.liveExitCancelBtn} onClick={() => setExitSheetOpen(false)}>取消</button>
         </section>
       </div> : null}

@@ -138,6 +138,8 @@ function normalizePhoto(raw: unknown): PhotoRecord | null {
     manualFields: uniqueStrings(item.manualFields),
     usageHistory: normalizeUsageHistory(item.usageHistory),
     origin: item.origin === "generated" ? "generated" : "upload",
+    generatedByCharacterId: cleanOptional(item.generatedByCharacterId, 180),
+    generationPrompt: cleanOptional(item.generationPrompt, 32000),
     sourceAppId: cleanOptional(item.sourceAppId, 60),
     sourceAccountId: cleanOptional(item.sourceAccountId, 180),
     seriesId: cleanOptional(item.seriesId, 120),
@@ -150,17 +152,26 @@ function normalizePhoto(raw: unknown): PhotoRecord | null {
   };
 }
 
+export function generatedPhotoOwner(photo: PhotoRecord): string | undefined {
+  if (photo.origin !== "generated") return undefined;
+  if (photo.generatedByCharacterId) return photo.generatedByCharacterId;
+  if (photo.sourceAccountId?.endsWith(":alt") && photo.sourceAccountId !== "user:alt") return photo.sourceAccountId.slice(0, -4);
+  if (photo.linkedCharacterIds.length === 1) return photo.linkedCharacterIds[0];
+}
+
 function normalizeCurrentTraits(value: unknown): Record<string, CharacterCurrentTraits> {
   if (!value || typeof value !== "object") return {};
   const result: Record<string, CharacterCurrentTraits> = {};
   for (const [characterId, raw] of Object.entries(value as Record<string, unknown>)) {
     if (!raw || typeof raw !== "object") continue;
     const item = raw as Record<string, unknown>;
-    const text = cleanOptional(item.text, 1000);
-    if (!text) continue;
+    const text = cleanOptional(item.text, 1000) || "";
+    const generatedReferencePhotoId = cleanOptional(item.generatedReferencePhotoId, 180);
+    if (!text && !generatedReferencePhotoId) continue;
     result[characterId] = {
       text,
       sourcePhotoId: cleanOptional(item.sourcePhotoId, 180),
+      generatedReferencePhotoId,
       updatedAt: typeof item.updatedAt === "number" && Number.isFinite(item.updatedAt) ? item.updatedAt : Date.now(),
     };
   }
@@ -187,9 +198,27 @@ function normalizeState(parsed: unknown): PhotoLibraryState {
     if (!id || !characterId || !name || albumIds.has(id)) return [];
     albumIds.add(id);
     const createdAt = typeof item.createdAt === "number" && Number.isFinite(item.createdAt) ? item.createdAt : Date.now();
-    return [{ id, characterId, name, photoIds: uniqueStrings(item.photoIds).filter(photoId => byId.get(photoId)?.linkedCharacterIds.includes(characterId)), createdAt,
-      updatedAt: typeof item.updatedAt === "number" && Number.isFinite(item.updatedAt) ? item.updatedAt : createdAt }];
+    const origin = item.origin === "generated" ? "generated" : undefined;
+    const photoIds = uniqueStrings(item.photoIds);
+    const updatedAt = typeof item.updatedAt === "number" && Number.isFinite(item.updatedAt) ? item.updatedAt : createdAt;
+    return [{ id, characterId, name, origin, photoIds: photoIds.filter(photoId => {
+      const photo = byId.get(photoId);
+      return photo && (origin === "generated"
+        ? generatedPhotoOwner(photo) === characterId
+        : photo.origin !== "generated" && photo.linkedCharacterIds.includes(characterId));
+    }), createdAt, updatedAt }];
   });
+  for (const raw of Array.isArray(root.albums) ? root.albums : []) {
+    if (!raw || typeof raw !== "object" || raw.origin === "generated") continue;
+    const album = albums.find(row => row.id === raw.id);
+    if (!album) continue;
+    const photoIds = uniqueStrings(raw.photoIds).filter(id => {
+      const photo = byId.get(id);
+      return photo && generatedPhotoOwner(photo) === album.characterId;
+    });
+    const id = `generated_${album.id}`;
+    if (photoIds.length && !albumIds.has(id)) albums.push({ ...album, id, origin: "generated", photoIds });
+  }
   return {
     version: 2,
     photos,
@@ -258,12 +287,12 @@ export function appendPhotoRecords(records: PhotoRecord[]): PhotoLibraryState {
   return savePhotoLibrary({ ...current, photos: [...records, ...current.photos] });
 }
 
-export function createPhotoAlbum(characterId: string, name: string, photoIds: string[] = []): PhotoAlbum | null {
+export function createPhotoAlbum(characterId: string, name: string, photoIds: string[] = [], origin?: PhotoAlbum["origin"]): PhotoAlbum | null {
   const cleaned = name.trim().slice(0, 80);
   if (!characterId || !cleaned) return null;
   const current = loadPhotoLibrary();
   const now = Date.now();
-  const album: PhotoAlbum = { id: `album_${now}_${Math.random().toString(36).slice(2, 9)}`, characterId, name: cleaned, photoIds, createdAt: now, updatedAt: now };
+  const album: PhotoAlbum = { id: `album_${now}_${Math.random().toString(36).slice(2, 9)}`, characterId, name: cleaned, origin, photoIds, createdAt: now, updatedAt: now };
   return savePhotoLibrary({ ...current, albums: [...current.albums, album] }).albums.find(item => item.id === album.id) ?? null;
 }
 
@@ -322,7 +351,13 @@ export function removePhotoRecords(photoIds: string[]): PhotoRecord[] {
   if (!removed.length) return [];
   const traits = { ...current.currentTraitsByCharacter };
   for (const [characterId, value] of Object.entries(traits)) {
-    if (value.sourcePhotoId && ids.has(value.sourcePhotoId)) traits[characterId] = { ...value, sourcePhotoId: undefined };
+    if ((value.sourcePhotoId && ids.has(value.sourcePhotoId)) || (value.generatedReferencePhotoId && ids.has(value.generatedReferencePhotoId))) {
+      traits[characterId] = {
+        ...value,
+        sourcePhotoId: value.sourcePhotoId && ids.has(value.sourcePhotoId) ? undefined : value.sourcePhotoId,
+        generatedReferencePhotoId: value.generatedReferencePhotoId && ids.has(value.generatedReferencePhotoId) ? undefined : value.generatedReferencePhotoId,
+      };
+    }
   }
   savePhotoLibrary({ ...current,
     photos: current.photos.filter(photo => !ids.has(photo.id)).map(photo => ids.has(photoStackCover(photo, current.photos).id)
@@ -341,16 +376,28 @@ export function setCharacterCurrentTraits(characterId: string, text: string, sou
   const current = loadPhotoLibrary();
   const next = { ...current.currentTraitsByCharacter };
   const cleaned = text.trim();
-  if (!cleaned) delete next[characterId];
+  const previous = current.currentTraitsByCharacter[characterId];
+  if (!cleaned && !previous?.generatedReferencePhotoId) delete next[characterId];
   else {
-    const previous = current.currentTraitsByCharacter[characterId];
     next[characterId] = {
       text: cleaned.slice(0, 1000),
       sourcePhotoId: sourcePhotoId !== undefined ? sourcePhotoId : previous?.sourcePhotoId,
+      generatedReferencePhotoId: previous?.generatedReferencePhotoId,
       updatedAt: Date.now(),
     };
   }
   savePhotoLibrary({ ...current, currentTraitsByCharacter: next });
+}
+
+export function setGeneratedPhotoReference(characterId: string, photoId?: string): void {
+  const current = loadPhotoLibrary();
+  const photo = current.photos.find(item => item.id === photoId);
+  if (photoId && (!photo || generatedPhotoOwner(photo) !== characterId)) return;
+  const previous = current.currentTraitsByCharacter[characterId];
+  savePhotoLibrary({ ...current, currentTraitsByCharacter: {
+    ...current.currentTraitsByCharacter,
+    [characterId]: { ...previous, text: previous?.text || "", generatedReferencePhotoId: photoId, updatedAt: Date.now() },
+  } });
 }
 
 export function setPhotoLibraryPreferences(patch: Partial<PhotoLibraryPreferences>): void {

@@ -9,6 +9,7 @@ import {getWeekStartIso,getWeekdayLabel} from './calendar-utils';
 const CAL='ai_phone_calendar_plans_v1',WVS='ai_phone_weverse_state_v1',MIG='ai_phone_calendar_master_v2';registerKvMigration(MIG);
 let running=false;
 export const isPublicCalendarItem=(item:CalendarScheduleItem,_now=Date.now())=>item.visibility==='public';
+export const calendarWeverseKey = (item: CalendarScheduleItem) => item.externalId || item.sharedGroupId || item.id;
 const zoneOf=(id:string)=>loadCharacters().find(c=>c.id===id)?.timeZone||getSystemTimeZone();
 /** The only writer of WVS calendar projections; originals, privacy and replay links live in Calendar. */
 export function reconcileCalendarMaster(){
@@ -31,13 +32,13 @@ export function reconcileCalendarMaster(){
   const liveIds=new Set((wvs.lives||[]).map(l=>l.id));
   for(const plan of store.plans){const next=plan.items.filter(i=>!i.linkedLiveId||liveIds.has(i.linkedLiveId));if(next.length!==plan.items.length){plan.items=next;changed=true;}}
   for(const live of wvs.lives||[]){
-   if(live.status!=='ended')continue;
+   if(live.official || live.status!=='ended')continue;
    for(const id of live.hostCharacterIds){const who=owner(id),start=stamp(live.startedAt,id),date=start.slice(0,10),time=start.slice(11,16),end=stamp(live.endedAt||live.startedAt+60000,id);
     const rows=store.plans.filter(p=>p.ownerType===who.type&&p.ownerId===who.id).flatMap(p=>p.items);
     if(rows.some(i=>i.linkedLiveId===live.id))continue;
     const matching=rows.find(i=>i.visibility==='public'&&i.kind!=='milestone'&&i.date===date&&i.title===live.title);
     if(matching){matching.linkedLiveId=live.id;changed=true;continue;}
-    const now=new Date().toISOString();planFor(id,date).items.push({id:`live_${live.id}_${id}`,linkedLiveId:live.id,title:live.title||'LIVE',date,weekday:getWeekdayLabel(date),startTime:time,endTime:end.slice(0,10)!==date?'23:59':end.slice(11,16)>time?end.slice(11,16):time==='23:59'?'23:59':`${String(Math.floor((Number(time.slice(0,2))*60+Number(time.slice(3))+1)/60)).padStart(2,'0')}:${String((Number(time.slice(3))+1)%60).padStart(2,'0')}`,location:'',kind:'event',visibility:'public',wvsType:'media',busyLevel:3,colorKey:'rose',source:'weverse',createdAt:now,updatedAt:now});changed=true;
+    const now=new Date().toISOString();planFor(id,date).items.push({id:`live_${live.id}_${id}`,linkedLiveId:live.id,title:live.title||'Live',date,weekday:getWeekdayLabel(date),startTime:time,endTime:end.slice(0,10)!==date?'23:59':end.slice(11,16)>time?end.slice(11,16):time==='23:59'?'23:59':`${String(Math.floor((Number(time.slice(0,2))*60+Number(time.slice(3))+1)/60)).padStart(2,'0')}:${String((Number(time.slice(3))+1)%60).padStart(2,'0')}`,location:'',kind:'event',visibility:'public',wvsType:'media',busyLevel:3,colorKey:'rose',source:'weverse',createdAt:now,updatedAt:now});changed=true;
    }
   }
   if(changed)kvSet(CAL,JSON.stringify(store));
@@ -46,9 +47,11 @@ export function reconcileCalendarMaster(){
    if(plan.ownerType==='user'?!community.userIdentityId:!community.memberCharacterIds.includes(plan.ownerId))continue;
    const memberId=plan.ownerType==='user'?`user:${community.userIdentityId}`:plan.ownerId;
    for(const item of plan.items){if(!isPublicCalendarItem(item))continue;
-    const id=item.linkedLiveId?`cal_${community.id}_live_${item.linkedLiveId}`:`cal_${community.id}_${item.sharedGroupId||item.externalId||item.id}`;
+    const linkedLive=item.linkedLiveId?(wvs.lives||[]).find(l=>l.id===item.linkedLiveId):undefined;
+    if(linkedLive?.official || (linkedLive && linkedLive.communityId!==community.id))continue;
+    const id=item.linkedLiveId?`cal_${community.id}_live_${item.linkedLiveId}`:`cal_${community.id}_${calendarWeverseKey(item)}`;
     const existing=schedules.find(s=>s.id===id);if(existing){if(!existing.memberCharacterIds.includes(memberId))existing.memberCharacterIds.push(memberId);continue;}
-    const zone=zoneOf(plan.ownerId),live=item.linkedLiveId?wvs.lives.find(l=>l.id===item.linkedLiveId):undefined,startsAt=live?.startedAt??calendarWallTimeToInstant(item.date,item.startTime,zone);
+    const zone=zoneOf(plan.ownerId),live=linkedLive,startsAt=live?.startedAt??calendarWallTimeToInstant(item.date,item.startTime,zone);
     schedules.push({id,communityId:community.id,title:item.title,contentDescription:item.contentDescription,linkedLiveId:item.linkedLiveId,publicAt:item.publicAt?scheduleContentUnlockAt(item,zone):undefined,type:item.wvsType||(item.kind==='milestone'?'release':'performance'),visibility:'public',calendarSync:item.kind!=='milestone',busyLevel:item.kind==='milestone'?1:item.busyLevel||3,startsAt,endsAt:live?.endedAt??(item.kind==='milestone'?undefined:calendarWallTimeToInstant(item.date,item.endTime,zone)),location:undefined,memberCharacterIds:[memberId],source:'manual',createdAt:Date.parse(item.createdAt),updatedAt:Date.parse(item.updatedAt)});
    }
   }

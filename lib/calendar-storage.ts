@@ -1,7 +1,9 @@
 import {isCalendarItemTimeAllowed} from "./calendar-utils";
 import { schedulePublicContentSuffix } from "./schedule-public-content";
 import { loadCharacters } from "./character-storage";
-import { reconcileCalendarMaster } from "./calendar-master";
+import { formatZonedPromptTimestamp, getSystemTimeZone } from "./character-time";
+import { calendarWallTimeToInstant } from "./calendar-time";
+import { calendarWeverseKey, reconcileCalendarMaster } from "./calendar-master";
 import type { CalendarColorKey, CalendarOwnerType, CalendarScheduleItem, CalendarWeekPlan } from "./calendar-types";
 import {
   formatIsoDate,
@@ -302,27 +304,49 @@ export function deleteLinkedCalendarScheduleItem(groupId: string): void {
   })) });
 }
 
-export type PendingCalendarGroup={id:string;owners:Array<{ownerId:string;item:CalendarScheduleItem}>;conflicts:string[]};
+export type PendingCalendarGroup={id:string;owners:Array<{ownerId:string;item:CalendarScheduleItem}>;conflicts:string[];weverseKey?:string};
 const PENDING_KEY="ai_phone_calendar_pending_v1";registerKvMigration(PENDING_KEY);
 export function loadPendingCalendarGroups():PendingCalendarGroup[]{try{return JSON.parse(kvGet(PENDING_KEY)||"[]");}catch{return [];}}
 export function removePendingCalendarGroup(id:string){kvSet(PENDING_KEY,JSON.stringify(loadPendingCalendarGroups().filter(g=>g.id!==id)));}
-export function applyGeneratedCalendarRange(generatedByOwner:Array<{ownerId:string;items:CalendarScheduleItem[]}>,fromDate:string,toDate:string,mode:"supplement"|"replan"): {saved:number;pending:number} {
+export function applyGeneratedCalendarRange(generatedByOwner:Array<{ownerId:string;items:CalendarScheduleItem[]}>,fromDate:string,toDate:string,mode:"supplement"|"replan",weverseKey?:string): {saved:number;pending:number} {
  const store=loadStore();
  const replaced=mode==="replan"?new Set(generatedByOwner.flatMap(({ownerId})=>store.plans.filter(p=>p.ownerType===(ownerId.startsWith("user:")?"user":"character")&&p.ownerId===(ownerId.startsWith("user:")?"self":ownerId)).flatMap(p=>p.items).filter(i=>i.source==="generated"&&i.date>=fromDate&&i.date<=toDate).map(i=>i.sharedGroupId).filter(Boolean))):new Set();
  const plans=store.plans.map(p=>({...p,items:p.items.filter(i=>!((i.sharedGroupId&&replaced.has(i.sharedGroupId))||(mode==="replan"&&generatedByOwner.some(o=>o.ownerId===p.ownerId)&&p.ownerType==="character"&&i.source==="generated"&&i.date>=fromDate&&i.date<=toDate)))}));
  const groups=new Map<string,PendingCalendarGroup>();
- for(const {ownerId,items} of generatedByOwner)for(const item of items){if(item.date<fromDate||item.date>toDate)continue;const key=item.sharedGroupId||item.id;const g=groups.get(key)||{id:key,owners:[],conflicts:[]};g.owners.push({ownerId,item});groups.set(key,g);}
- let saved=0;const pending=loadPendingCalendarGroups();
+ for(const {ownerId,items} of generatedByOwner)for(const item of items){if(item.date<fromDate||item.date>toDate)continue;const key=weverseKey||item.sharedGroupId||item.id;const g=groups.get(key)||{id:key,owners:[],conflicts:[],weverseKey};g.owners.push({ownerId,item});groups.set(key,g);}
+ let saved=0;const pending=loadPendingCalendarGroups().filter(group=>!weverseKey||group.id!==weverseKey);
  for(const group of groups.values()){
   group.conflicts=[];
-  const additions=group.owners.filter(({ownerId,item})=>!plans.filter(p=>p.ownerType===(ownerId.startsWith("user:")?"user":"character")&&p.ownerId===(ownerId.startsWith("user:")?"self":ownerId)).flatMap(p=>p.items).some(i=>(i.id===item.id&&i.date===item.date&&i.startTime===item.startTime&&i.endTime===item.endTime&&i.title===item.title&&i.visibility===item.visibility&&i.kind===item.kind&&i.publicAt===item.publicAt&&i.contentDescription===item.contentDescription&&i.location===item.location&&i.busyLevel===item.busyLevel)||(i.id!==item.id&&i.date===item.date&&i.startTime===item.startTime&&i.endTime===item.endTime&&i.title===item.title)));
-  for(const {ownerId,item} of additions)if(item.kind!=="milestone")for(const existing of plans.filter(p=>p.ownerType===(ownerId.startsWith("user:")?"user":"character")&&p.ownerId===(ownerId.startsWith("user:")?"self":ownerId)).flatMap(p=>p.items))if(existing.id!==item.id&&existing.kind!=="milestone"&&existing.date===item.date&&existing.startTime<item.endTime&&item.startTime<existing.endTime)group.conflicts.push(`${ownerId}：${existing.date} ${existing.startTime}–${existing.endTime} ${existing.title}`);
+  const additions=weverseKey ? group.owners : group.owners.filter(({ownerId,item})=>!plans.filter(p=>p.ownerType===(ownerId.startsWith("user:")?"user":"character")&&p.ownerId===(ownerId.startsWith("user:")?"self":ownerId)).flatMap(p=>p.items).some(i=>(i.id===item.id&&i.date===item.date&&i.startTime===item.startTime&&i.endTime===item.endTime&&i.title===item.title&&i.visibility===item.visibility&&i.kind===item.kind&&i.publicAt===item.publicAt&&i.contentDescription===item.contentDescription&&i.location===item.location&&i.busyLevel===item.busyLevel)||(i.id!==item.id&&i.date===item.date&&i.startTime===item.startTime&&i.endTime===item.endTime&&i.title===item.title)));
+  for(const {ownerId,item} of additions)if(item.kind!=="milestone")for(const existing of plans.filter(p=>p.ownerType===(ownerId.startsWith("user:")?"user":"character")&&p.ownerId===(ownerId.startsWith("user:")?"self":ownerId)).flatMap(p=>p.items))if(existing.id!==item.id&&calendarWeverseKey(existing)!==weverseKey&&existing.kind!=="milestone"&&existing.date===item.date&&existing.startTime<item.endTime&&item.startTime<existing.endTime)group.conflicts.push(`${ownerId}：${existing.date} ${existing.startTime}–${existing.endTime} ${existing.title}`);
   if(group.conflicts.length){pending.push(group);continue;}
+  if (weverseKey) for (const plan of plans) plan.items = plan.items.filter(item => calendarWeverseKey(item) !== weverseKey);
   for(const {ownerId,item} of additions){const weekStart=getWeekStartIso(new Date(`${item.date}T00:00:00`));let plan=plans.find(p=>p.ownerType===(ownerId.startsWith("user:")?"user":"character")&&p.ownerId===(ownerId.startsWith("user:")?"self":ownerId)&&p.weekStart===weekStart);if(!plan){plan={id:`calendar_${Date.now()}_${Math.random()}`,ownerType:ownerId.startsWith("user:")?"user":"character",ownerId:ownerId.startsWith("user:")?"self":ownerId,weekStart,items:[],updatedAt:new Date().toISOString()};plans.push(plan);}plan.items=plan.items.filter(i=>i.id!==item.id);for(const other of plans)if(other!==plan&&other.ownerType===(ownerId.startsWith("user:")?"user":"character")&&other.ownerId===(ownerId.startsWith("user:")?"self":ownerId))other.items=other.items.filter(i=>i.id!==item.id);plan.items.push(item);saved++;}
  }
  kvSet(PENDING_KEY,JSON.stringify(pending));saveStore({plans});return {saved,pending:[...groups.values()].filter(g=>g.conflicts.length).length};
 }
-export function saveAdjustedPendingGroup(id:string, patch:Pick<CalendarScheduleItem,"date"|"startTime"|"endTime">){const group=loadPendingCalendarGroups().find(g=>g.id===id);if(!group)return {saved:0,pending:0};const owners=group.owners.map(o=>({ownerId:o.ownerId,items:[{...o.item,...patch,weekday:getWeekdayLabel(patch.date)}]}));removePendingCalendarGroup(id);return applyGeneratedCalendarRange(owners,patch.date,patch.date,"supplement");}
+export function saveAdjustedPendingGroup(id: string, patch: Pick<CalendarScheduleItem, "date" | "startTime" | "endTime">) {
+  const group = loadPendingCalendarGroups().find(item => item.id === id);
+  if (!group?.owners.length) return { saved: 0, pending: 0 };
+  const characters = group.weverseKey ? loadCharacters() : [];
+  const zoneFor = (ownerId: string) => characters.find(character => character.id === ownerId)?.timeZone || getSystemTimeZone();
+  const zone = zoneFor(group.owners[0].ownerId);
+  const startsAt = group.weverseKey ? calendarWallTimeToInstant(patch.date, patch.startTime, zone) : 0;
+  const endsAt = group.weverseKey ? calendarWallTimeToInstant(patch.date, patch.endTime, zone) : 0;
+  const owners = group.owners.map(({ ownerId, item }) => {
+    let dates = patch;
+    if (group.weverseKey) {
+      const start = formatZonedPromptTimestamp(new Date(startsAt), zoneFor(ownerId));
+      const end = formatZonedPromptTimestamp(new Date(endsAt), zoneFor(ownerId));
+      const date = start.slice(0, 10);
+      dates = { date, startTime: start.slice(11, 16), endTime: end.startsWith(date) ? end.slice(11, 16) : "23:59" };
+    }
+    return { ownerId, items: [{ ...item, ...dates, weekday: getWeekdayLabel(dates.date) }] };
+  });
+  const dates = owners.map(owner => owner.items[0].date).sort();
+  removePendingCalendarGroup(id);
+  return applyGeneratedCalendarRange(owners, dates[0], dates[dates.length - 1], "supplement", group.weverseKey);
+}
 
 export function deleteCalendarScheduleItem(
   ownerType: CalendarOwnerType,
@@ -530,6 +554,17 @@ export function loadCalendarItemsByExternalId(externalSource: "weverse", externa
     }
   }
   return rows;
+}
+
+export function loadCalendarEntriesByWeverseKey(key: string) {
+  return loadStore().plans.flatMap(plan => plan.items.filter(item => calendarWeverseKey(item) === key)
+    .map(item => ({ ownerId: plan.ownerType === "user" ? "user:self" : plan.ownerId, item })));
+}
+
+export function deleteCalendarEntriesByWeverseKey(key: string) {
+  const store = loadStore();
+  removePendingCalendarGroup(key);
+  saveStore({ plans: store.plans.map(plan => ({ ...plan, items: plan.items.filter(item => calendarWeverseKey(item) !== key) })) });
 }
 
 export function validateScheduleDraft(item: {

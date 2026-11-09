@@ -1,5 +1,6 @@
 "use client";
 import {TwitterFrozenCard,TwitterSnapshotWindow} from "@/components/twitter/twitter-sharing";
+import { WeverseLiveInviteCard } from "./weverse-live-invite-card";
 import { LivePhotoBubble } from "./live-photo";
 import {ReversePhoneRecord} from "./reverse-phone-overlay";
 import { ForwardedChatBubble } from "./forwarded-chat-record";
@@ -146,6 +147,8 @@ export const MessageBubble = memo(function MessageBubble({ msg, photoGroup, onUp
             return <MusicShareBubble msg={msg} onPlay={onMusicPlay} />;
         case "media_file":
             return <MediaFileBubble msg={msg} onUpdate={onUpdate} characterId={characterId} />;
+        case "weverse_live_invite":
+            return <WeverseLiveInviteCard message={msg} />;
         case "xiaohongshu_note_share":
             return <XiaohongshuShareBubble msg={msg} />;
         case "meeting_invite":

@@ -16,7 +16,7 @@ export type WeverseMemberProfile = {
   coverUrl?: string;
   liveCoverUrl?: string;
   bio?: string;
-  /** WVS 公开素材池：仅保存 Photos photoId 引用，不复制图片本体。 */
+  /** Weverse 公开素材池：仅保存 Photos photoId 引用，不复制图片本体。 */
   wvsMediaPhotoIds?: string[];
   /** 仅记录角色自主修改，用于低频冷却；用户手动编辑/推荐头像不占用。 */
   lastAutonomousNameAt?: number;
@@ -140,7 +140,7 @@ export type WeverseLive = {
   roundCount: number;
   /** 已经提交给角色处理过的用户评论时间上界。 */
   lastConsumedUserCommentAt?: number;
-  /** 官方账号名义的 LIVE；Stage 仍由实际参与成员发言。 */
+  /** 官方账号名义的 Live；Stage 仍由实际参与成员发言。 */
   official?: boolean;
   segments: WeverseLiveSegment[];
   comments: WeverseLiveComment[];
@@ -230,7 +230,7 @@ function normalizeLive(raw: unknown): WeverseLive | null {
   const viewerPresence = viewerPresenceRaw.map(normalizeLivePresence).filter((v: WeverseLivePresence | null): v is WeverseLivePresence => Boolean(v));
   return {
     id: item.id, communityId: item.communityId, hostCharacterIds, activeCharacterIds, participantPresence, viewerPresence, liveType: item.liveType === "voice" ? "voice" : "visual", orientation: "landscape",
-    status, title: typeof item.title === "string" && item.title.trim() ? item.title.trim() : "LIVE",
+    status, title: typeof item.title === "string" && item.title.trim() ? item.title.trim() : "Live",
     theme: typeof item.theme === "string" && item.theme.trim() ? item.theme.trim() : undefined,
     coverUrl: typeof (item as any).coverUrl === "string" && (item as any).coverUrl ? (item as any).coverUrl : undefined, startedAt,
     endedAt: typeof item.endedAt === "number" && Number.isFinite(item.endedAt) ? item.endedAt : undefined,
@@ -333,7 +333,7 @@ export function getWeverseCommunitiesForCharacter(characterId: string): WeverseC
 }
 
 /**
- * 更新角色在某个 WVS Community 中的独立资料；不触碰 Character 本体。
+ * 更新角色在某个 Weverse Community 中的独立资料；不触碰 Character 本体。
  * 未指定 communityId 时使用该角色加入的第一个 Community（当前 UI 的主资料语义）。
  */
 export function updateWeverseMemberProfile(

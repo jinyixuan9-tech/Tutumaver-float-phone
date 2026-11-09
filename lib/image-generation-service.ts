@@ -4,6 +4,7 @@ import { applyImageGenerationBinding } from "./image-generation-binding";
 import JSZip from "jszip";
 import { getChatImageFromIndexedDB } from "./chat-asset-storage";
 import { storeMediaBlob } from "./media-cache-storage";
+import { generatedPhotoOwner, loadPhotoLibrary } from "./photo-library-storage";
 import { throwIfAborted } from "./abort-utils";
 import {
   NOVELAI_COMMON_MODELS,
@@ -740,6 +741,12 @@ export async function fetchNovelAiModels(apiKey: string): Promise<string[]> {
   }
 }
 
+function selectedGeneratedReference(characterId: string) {
+  const library = loadPhotoLibrary();
+  const id = library.currentTraitsByCharacter[characterId]?.generatedReferencePhotoId;
+  return id ? library.photos.find(photo => photo.id === id && generatedPhotoOwner(photo) === characterId) : undefined;
+}
+
 export async function generateImageFromConfiguredApi(params: {
   description: string;
   characterId?: string;
@@ -810,18 +817,21 @@ export async function generateImageFromConfiguredApi(params: {
   if (!openaiSettings.apiKey.trim() || !openaiSettings.baseUrl.trim() || !openaiSettings.model.trim()) return null;
 
   const reference = params.characterId ? settings.characterReferences?.[params.characterId] : undefined;
+  const selectedPhoto = !params.settings && params.useReferenceImage && params.characterId
+    ? selectedGeneratedReference(params.characterId) : undefined;
   // 「非自拍不使用参考图」开关已从生图设置页删除：参考图启用后始终参与生成
   const shouldUseReference = Boolean(
     params.useReferenceImage
     && reference?.assetId
     && reference.enabled !== false,
   );
-  const rawReferenceImageDataUrl = shouldUseReference && reference?.assetId
+  const selectedImageDataUrl = selectedPhoto ? await getChatImageFromIndexedDB(selectedPhoto.assetId).catch(() => null) : null;
+  const rawReferenceImageDataUrl = selectedImageDataUrl || (shouldUseReference && reference?.assetId
     ? await getChatImageFromIndexedDB(reference.assetId)
-    : null;
+    : null);
   throwIfAborted(params.signal);
   const referenceImageDataUrl = rawReferenceImageDataUrl
-    ? await normalizeReferenceImageForEdit(rawReferenceImageDataUrl, reference?.faceCrop)
+    ? await normalizeReferenceImageForEdit(rawReferenceImageDataUrl, selectedImageDataUrl ? undefined : reference?.faceCrop)
     : null;
   throwIfAborted(params.signal);
   const characterPrompt = reference?.featurePrompt?.trim() || "";
@@ -863,5 +873,5 @@ export function hasCharacterReferenceImage(characterId?: string): boolean {
   if (!characterId) return false;
   const settings = loadImageGenerationSettings();
   const ref = settings.characterReferences?.[characterId];
-  return Boolean(ref?.assetId);
+  return Boolean(ref?.assetId || (settings.provider !== "novelai" && selectedGeneratedReference(characterId)));
 }

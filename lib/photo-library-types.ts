@@ -30,6 +30,7 @@ export type PhotoSourceStrategy = "album_only" | "generated_only" | "album_then_
 export type CharacterCurrentTraits = {
   text: string;
   sourcePhotoId?: string;
+  generatedReferencePhotoId?: string;
   updatedAt: number;
 };
 
@@ -66,6 +67,8 @@ export type PhotoRecord = {
   usageHistory: PhotoUsageRecord[];
 
   origin?: "upload" | "generated";
+  generatedByCharacterId?: string;
+  generationPrompt?: string;
   sourceAppId?: string;
   sourceAccountId?: string;
   seriesId?: string;
@@ -99,6 +102,7 @@ export type PhotoAlbum = {
   id: string;
   characterId: string;
   name: string;
+  origin?: "generated";
   photoIds: string[];
   createdAt: number;
   updatedAt: number;

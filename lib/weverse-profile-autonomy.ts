@@ -1,3 +1,4 @@
+import { hasPhotoMatchDescription } from "./photo-library-usage";
 import type { Character } from "./character-types";
 import type { ChatMessage } from "./chat-storage";
 import { getChatImageFromIndexedDB } from "./chat-asset-storage";
@@ -45,7 +46,7 @@ function buildPhotoSummary(photo: ReturnType<typeof loadPhotoLibrary>["photos"][
   const appearance = mapped?.appearance || photo.appearance;
   return [
     cleanSummary(photo.subject, 60),
-    cleanSummary(photo.visionSummary, 110),
+    cleanSummary(photo.generationPrompt || photo.visionSummary, 110),
     cleanSummary(appearance?.hair, 40),
     cleanSummary(appearance?.outfit, 50),
     cleanSummary(appearance?.accessories, 40),
@@ -156,7 +157,7 @@ export function buildWeverseProfileAutonomyPrompt(
   });
   const photoCandidates = anyAvatarEligible
     ? library.photos
-      .filter((photo) => photo.aiUsable && photo.visionStatus === "done" && photo.linkedCharacterIds.includes(character.id) && Boolean(photo.assetId))
+      .filter((photo) => photo.aiUsable && hasPhotoMatchDescription(photo) && photo.linkedCharacterIds.includes(character.id) && Boolean(photo.assetId))
       .sort((a, b) => Math.max(b.updatedAt || 0, b.createdAt || 0) - Math.max(a.updatedAt || 0, a.createdAt || 0))
       .slice(0, MAX_WVS_AVATAR_CANDIDATES)
     : [];
@@ -218,7 +219,7 @@ export async function applyAutonomousWeverseProfileAction(characterId: string, c
       const photo = loadPhotoLibrary().photos.find((item) =>
         item.id === requestedId
         && item.aiUsable
-        && item.visionStatus === "done"
+        && hasPhotoMatchDescription(item)
         && item.linkedCharacterIds.includes(characterId)
         && Boolean(item.assetId),
       );

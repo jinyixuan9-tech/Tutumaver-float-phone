@@ -9,19 +9,20 @@ type Props = {
   characterId: string;
   albums: PhotoAlbum[];
   photoIds: string[];
+  origin?: PhotoAlbum["origin"];
   onClose: () => void;
   mode?: "create" | "manage";
   onCreated?: (id: string) => void;
 };
 
-export function PhotoAlbumSheet({ characterId, albums, photoIds, onClose, mode = "manage", onCreated }: Props) {
+export function PhotoAlbumSheet({ characterId, albums, photoIds, origin, onClose, mode = "manage", onCreated }: Props) {
   const [name, setName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const ownAlbums = albums.filter(album => album.characterId === characterId);
+  const ownAlbums = albums.filter(album => album.characterId === characterId && album.origin === origin);
   const submit = () => {
     if (!name.trim()) return;
     if (editingId) renamePhotoAlbum(editingId, name);
-    else { const album=createPhotoAlbum(characterId, name, photoIds); if(album && mode === "create") { onCreated?.(album.id); onClose(); return; } }
+    else { const album=createPhotoAlbum(characterId, name, photoIds, origin); if(album && mode === "create") { onCreated?.(album.id); onClose(); return; } }
     setEditingId(null);
     setName("");
   };

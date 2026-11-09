@@ -2,63 +2,110 @@ import { scheduleContentUnlockAt } from "./schedule-public-content";
 import { calendarWallTimeToInstant } from "./calendar-time";
 import { loadCharacters } from "./character-storage";
 import { formatZonedPromptTimestamp, getSystemTimeZone } from "./character-time";
-import { loadOwnerCalendarPlans, deleteCalendarScheduleItem } from "./calendar-storage";
-import { applyGeneratedCalendarRange } from "./calendar-storage";
-import { deleteCalendarItemsByExternalId, upsertCalendarScheduleItem } from "./calendar-storage";
-import { formatIsoDate, getWeekStartIso } from "./calendar-utils";
-import { loadWeverseState, upsertWeverseScheduleItem, deleteWeverseScheduleItem, type WeverseScheduleItem } from "./weverse-storage";
+import { applyGeneratedCalendarRange, deleteCalendarEntriesByWeverseKey, loadCalendarEntriesByWeverseKey } from "./calendar-storage";
+import { getWeekdayLabel } from "./calendar-utils";
+import type { CalendarScheduleItem } from "./calendar-types";
+import { loadWeverseState, type WeverseScheduleItem } from "./weverse-storage";
 
-function toDateParts(ts:number,zone:string){const value=formatZonedPromptTimestamp(new Date(ts),zone);return {date:value.slice(0,10),time:value.slice(11,16)};}
+const calendarOwner = (id: string) => id.startsWith("user:") ? "user:self" : id;
+
+function scheduleKey(item: WeverseScheduleItem) {
+  const prefix = `cal_${item.communityId}_`;
+  return item.id.startsWith(prefix) ? item.id.slice(prefix.length) : item.id;
+}
+
+function toDateParts(timestamp: number, zone: string) {
+  const value = formatZonedPromptTimestamp(new Date(timestamp), zone);
+  return { date: value.slice(0, 10), time: value.slice(11, 16) };
+}
 
 export function syncWeverseScheduleItemToCalendar(item: WeverseScheduleItem) {
-  if (item.visibility !== "public") return {saved:0,pending:0};
-  const rows=item.memberCharacterIds.map(characterId=>{
-    if(characterId.startsWith("user:")){const start=toDateParts(item.startsAt,getSystemTimeZone()),end=toDateParts(item.endsAt||item.startsAt+60000,getSystemTimeZone());const existing=loadOwnerCalendarPlans("user","self").flatMap(p=>p.items).find(i=>i.externalId===item.id||`cal_${item.communityId}_${i.sharedGroupId||i.externalId||i.id}`===item.id);return {ownerId:"user:self",items:[{colorKey:"blue" as const,id:existing?.id||`wvs_${item.id}`,date:start.date,weekday:"",startTime:start.time,endTime:item.calendarSync?(end.time>start.time?end.time:"23:59"):start.time,title:item.title,location:item.location||"",contentDescription:item.contentDescription,publicAt:item.publicAt?new Date(item.publicAt).toISOString():undefined,visibility:"public" as const,kind:item.calendarSync?"event" as const:"milestone" as const,source:"weverse" as const,externalSource:"weverse" as const,externalId:existing?existing.externalId:item.id,busyLevel:item.calendarSync?item.busyLevel:1 as const,createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()}]};}
-    const zone=loadCharacters().find(c=>c.id===characterId)?.timeZone||getSystemTimeZone();
-    const start=toDateParts(item.startsAt,zone),end=toDateParts(item.endsAt||item.startsAt+3600000,zone);
-    const endTime=end.date===start.date&&end.time>start.time?end.time:"23:59";
-    const existing=loadOwnerCalendarPlans("character",characterId).flatMap(p=>p.items).find(i=>i.externalId===item.id||`cal_${item.communityId}_${i.sharedGroupId||i.externalId||i.id}`===item.id);
-    return {ownerId:characterId,items:[{id:existing?.id||`wvs_${item.id}_${characterId}`,date:start.date,weekday:"",startTime:start.time,endTime:item.calendarSync?endTime:start.time,location:item.location||"",title:item.title,contentDescription:item.contentDescription,publicAt:item.publicAt ? new Date(item.publicAt).toISOString() : undefined,colorKey:"blue" as const,source:"weverse" as const,externalSource:"weverse" as const,externalId:existing?existing.externalId:item.id,sharedGroupId:existing?.sharedGroupId||`wvs_${item.id}`,sharedCharacterIds:item.memberCharacterIds,visibility:"public" as const,kind:item.calendarSync?"event" as const:"milestone" as const,wvsType:item.type,busyLevel:item.calendarSync?(item.busyLevel||3):1,createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()}]};
-  }).filter((row): row is NonNullable<typeof row>=>Boolean(row));
-  // Updating an existing projection replaces its linked calendar copy.
+  if (!item.memberCharacterIds.length || item.linkedLiveId) return { saved: 0, pending: 0 };
+  const key = scheduleKey(item);
+  const previous = loadCalendarEntriesByWeverseKey(key);
+  const community = loadWeverseState().communities.find(row => row.id === item.communityId);
+  const localOwners = new Set((community?.memberCharacterIds ?? item.memberCharacterIds).map(calendarOwner));
+  const ownerIds = new Set(item.memberCharacterIds.map(calendarOwner));
+  // Another community can show this same event with a subset of its participants.
+  for (const row of previous) if (!localOwners.has(row.ownerId)) ownerIds.add(row.ownerId);
 
-  const result=applyGeneratedCalendarRange(rows,rows.map(r=>r.items[0].date).sort()[0]||"",rows.map(r=>r.items[0].date).sort().at(-1)||"","supplement");
-  if(result.pending&&typeof window!=="undefined")window.dispatchEvent(new CustomEvent("calendar-pending-updated"));
-  return result;
+  const characters = loadCharacters();
+  const now = new Date().toISOString();
+  const rows = Array.from(ownerIds, ownerId => {
+    const existing = previous.find(row => row.ownerId === ownerId)?.item;
+    const zone = characters.find(character => character.id === ownerId)?.timeZone || getSystemTimeZone();
+    const start = toDateParts(item.startsAt, zone);
+    const end = toDateParts(item.endsAt ?? item.startsAt + 3600000, zone);
+    const endTime = end.date === start.date && end.time > start.time ? end.time : "23:59";
+    const entry: CalendarScheduleItem = {
+      ...existing,
+      id: existing?.id || `wvs_${key}_${ownerId}`,
+      date: start.date,
+      weekday: getWeekdayLabel(start.date),
+      startTime: start.time,
+      endTime: item.calendarSync ? endTime : start.time,
+      title: item.title,
+      location: item.location ?? "",
+      contentDescription: item.contentDescription,
+      publicAt: item.publicAt ? new Date(item.publicAt).toISOString() : undefined,
+      colorKey: existing?.colorKey || "blue",
+      visibility: item.visibility === "public" ? "public" : "private",
+      kind: item.calendarSync ? "event" : "milestone",
+      wvsType: item.type,
+      source: "weverse",
+      externalSource: "weverse",
+      externalId: key,
+      sharedGroupId: undefined,
+      sharedCharacterIds: undefined,
+      busyLevel: item.calendarSync ? item.busyLevel || 3 : 1,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+    return { ownerId, items: [entry] };
+  });
+  const dates = rows.map(row => row.items[0].date).sort();
+  return applyGeneratedCalendarRange(rows, dates[0], dates[dates.length - 1], "supplement", key);
 }
 
 export function removeWeverseScheduleItemEverywhere(itemId: string): void {
-  const matched=loadWeverseState().schedules.find(s=>s.id===itemId);
-  if(matched)for(const ownerId of matched.memberCharacterIds)for(const plan of loadOwnerCalendarPlans(ownerId.startsWith("user:")?"user":"character",ownerId.startsWith("user:")?"self":ownerId))for(const i of plan.items){if(i.externalId===itemId||`cal_${matched.communityId}_${i.sharedGroupId||i.externalId||i.id}`===itemId)deleteCalendarScheduleItem(ownerId.startsWith("user:")?"user":"character",ownerId.startsWith("user:")?"self":ownerId,plan.weekStart,i.id);}
-  deleteCalendarItemsByExternalId("weverse", itemId);
-  deleteWeverseScheduleItem(itemId);
+  const matched = loadWeverseState().schedules.find(item => item.id === itemId);
+  deleteCalendarEntriesByWeverseKey(matched ? scheduleKey(matched) : itemId);
 }
 
-/**
- * 手机日历编辑了一个 WVS 投影时，把改动回写到 WVS 主数据；同一 Community 的其它成员投影随后重建。
- */
-export function syncCalendarProjectionBackToWeverse(externalId: string, patch: { date: string; startTime: string; endTime: string; location: string; title: string; contentDescription?: string; publicAt?: string }): void {
+export function syncCalendarProjectionBackToWeverse(
+  externalId: string,
+  ownerId: string,
+  patch: Pick<CalendarScheduleItem, "date" | "startTime" | "endTime" | "location" | "title" | "contentDescription" | "publicAt" | "visibility" | "kind" | "busyLevel">,
+) {
   const state = loadWeverseState();
-  const current = state.schedules.find((item) => item.id === externalId);
-  if (!current) return;
-  const zone = loadCharacters().find(c=>c.id===current.memberCharacterIds[0])?.timeZone||getSystemTimeZone();
-  const startsAt = calendarWallTimeToInstant(patch.date,patch.startTime,zone);
-  const endsAt = calendarWallTimeToInstant(patch.date,patch.endTime,zone);
-  const next: WeverseScheduleItem = {
-    ...current,
-    title: patch.title.trim() || current.title,
+  const current = state.schedules.find(item => scheduleKey(item) === externalId);
+  const previous = loadCalendarEntriesByWeverseKey(externalId);
+  const original = previous.find(row => row.ownerId === (ownerId === "self" ? "user:self" : ownerId))?.item;
+  if (!original || original.linkedLiveId) return;
+  const zone = loadCharacters().find(character => character.id === ownerId)?.timeZone || getSystemTimeZone();
+  const startsAt = calendarWallTimeToInstant(patch.date, patch.startTime, zone);
+  const endsAt = calendarWallTimeToInstant(patch.date, patch.endTime, zone);
+  const calendarSync = patch.kind !== "milestone";
+  return syncWeverseScheduleItemToCalendar({
+    id: current?.id ?? externalId,
+    communityId: current?.communityId ?? "",
+    memberCharacterIds: current?.memberCharacterIds ?? previous.map(row => row.ownerId),
+    source: current?.source ?? "manual",
+    type: original.wvsType || (patch.kind === "milestone" ? "release" : "performance"),
+    createdAt: Date.parse(original.createdAt),
+    title: patch.title.trim() || original.title,
     contentDescription: patch.contentDescription,
-    publicAt: patch.publicAt ? scheduleContentUnlockAt({...patch,startsAt},zone) : undefined,
+    publicAt: patch.publicAt ? scheduleContentUnlockAt({ ...patch, startsAt }, zone) : undefined,
     location: patch.location.trim() || undefined,
-    startsAt: Number.isFinite(startsAt) ? startsAt : current.startsAt,
-    endsAt: Number.isFinite(endsAt) && endsAt > startsAt ? endsAt : current.endsAt,
+    startsAt,
+    endsAt: calendarSync ? endsAt : undefined,
+    calendarSync,
+    busyLevel: patch.busyLevel,
+    visibility: patch.visibility === "public" ? "public" : "internal",
     updatedAt: Date.now(),
-  };
-  upsertWeverseScheduleItem(next);
-  syncWeverseScheduleItemToCalendar(next);
+  });
 }
 
-export function calendarForWeverseProjection(item:WeverseScheduleItem){
- for(const id of item.memberCharacterIds){const plans=loadOwnerCalendarPlans(id.startsWith('user:')?'user':'character',id.startsWith('user:')?'self':id);for(const p of plans)for(const row of p.items)if(row.externalId===item.id||`cal_${item.communityId}_${row.sharedGroupId||row.externalId||row.id}`===item.id)return row;}
- return undefined;
+export function calendarForWeverseProjection(item: WeverseScheduleItem) {
+  return loadCalendarEntriesByWeverseKey(scheduleKey(item))[0]?.item;
 }

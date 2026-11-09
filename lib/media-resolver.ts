@@ -3,8 +3,7 @@ import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "./chat-asse
 import { generateImageFromConfiguredApi } from "./image-generation-service";
 import { getPhotoResolverDebugEnabled, getPhotoSourceStrategy, recordPhotoUse, resolvePhotoForUse } from "./photo-library-resolver";
 import { appendPhotoRecords, appendPhotoUsage, createPhotoId, loadPhotoLibrary } from "./photo-library-storage";
-import { analyzePhotosInBackground } from "./photo-library-vision";
-import { canAutoUsePhoto } from "./photo-library-usage";
+import { canAutoUsePhoto, hasPhotoMatchDescription } from "./photo-library-usage";
 import type { PhotoRecord, PhotoUsageChannel } from "./photo-library-types";
 
 export type MediaIntentKind = "selfie" | "portrait" | "group" | "food" | "scenery" | "object" | "pet" | "official" | "other";
@@ -90,6 +89,9 @@ function similarity(a: string, b: string): number {
 }
 
 function photoText(photo: PhotoRecord): string {
+  if (photo.origin === "generated" && photo.generationPrompt) {
+    return [photo.displayName, photo.seriesId, photo.generationPrompt].filter(Boolean).join(" ");
+  }
   return [
     photo.subject,
     photo.seriesId,
@@ -112,7 +114,7 @@ async function resolveCharacterPoolPhoto(request: MediaResolverRequest & { actor
   if (!allowed.size) return null;
   const candidates = loadPhotoLibrary().photos
     .filter((photo) => allowed.has(photo.id))
-    .filter((photo) => photo.aiUsable && photo.visionStatus === "done")
+    .filter((photo) => photo.aiUsable && hasPhotoMatchDescription(photo))
     .filter((photo) => canAutoUsePhoto(photo, request.actor.characterId, request.channel, request.accountId))
     .map((photo) => ({ photo, score: similarity(request.description, photoText(photo)) }))
     .sort((a, b) => b.score - a.score);
@@ -129,7 +131,7 @@ async function resolveOfficialPoolPhoto(request: MediaResolverRequest & { actor:
   const excluded = new Set(request.actor.excludedPhotoIds || []);
   const all = loadPhotoLibrary().photos;
   const preferred = request.actor.preferredPhotoId
-    ? all.find((photo) => photo.id === request.actor.preferredPhotoId && allowed.has(photo.id) && !excluded.has(photo.id) && photo.aiUsable && photo.visionStatus === "done" && canAutoUsePhoto(photo, request.actor.officialId, "wvs_official"))
+    ? all.find((photo) => photo.id === request.actor.preferredPhotoId && allowed.has(photo.id) && !excluded.has(photo.id) && photo.aiUsable && hasPhotoMatchDescription(photo) && canAutoUsePhoto(photo, request.actor.officialId, "wvs_official"))
     : undefined;
   if (preferred) {
     const dataUrl = await getChatImageFromIndexedDB(preferred.assetId).catch(() => null);
@@ -138,7 +140,7 @@ async function resolveOfficialPoolPhoto(request: MediaResolverRequest & { actor:
   const candidates = all
     .filter((photo) => allowed.has(photo.id))
     .filter((photo) => !excluded.has(photo.id) && canAutoUsePhoto(photo, request.actor.officialId, "wvs_official"))
-    .filter((photo) => photo.aiUsable && photo.visionStatus === "done")
+    .filter((photo) => photo.aiUsable && hasPhotoMatchDescription(photo))
     .map((photo) => ({ photo, score: similarity(request.description, photoText(photo)) }))
     .sort((a, b) => b.score - a.score);
   const best = candidates[0];
@@ -171,8 +173,19 @@ async function generateMedia(request: MediaResolverRequest, intentKind: MediaInt
   const assetId = await saveChatImageToIndexedDB(generated.blob).catch(() => "");
   if (!assetId) return null;
   const photoLibraryId = createPhotoId();
-  appendPhotoRecords([{ id: photoLibraryId, assetId, originalName: `${request.appId}-${Date.now()}.png`, linkedCharacterIds: request.actor.type === "character" && request.channel !== "twitter_alt" ? [request.actor.characterId] : [], sharedPairIds: [], aiUsable: true, visionStatus: "unprocessed", usageHistory: request.deferUsage ? [] : [{ channel: request.channel, characterId: request.actor.type === "official" ? request.actor.officialId : request.actor.characterId, accountId: request.accountId, targetId: request.targetId, usedAt: Date.now() }], origin: "generated", sourceAppId: request.appId, sourceAccountId: request.actor.type === "official" ? request.actor.officialId : request.channel === "twitter_alt" ? request.accountId : undefined, createdAt: Date.now(), updatedAt: Date.now() }]);
-  analyzePhotosInBackground([photoLibraryId]);
+  const now = Date.now();
+  appendPhotoRecords([{
+    id: photoLibraryId, assetId, originalName: `${request.appId}-${now}.png`,
+    linkedCharacterIds: characterId && request.channel !== "twitter_alt" ? [characterId] : [],
+    sharedPairIds: [], aiUsable: true, visionStatus: "unprocessed",
+    usageHistory: request.deferUsage ? [] : [{
+      channel: request.channel, characterId: request.actor.type === "official" ? request.actor.officialId : request.actor.characterId,
+      accountId: request.accountId, targetId: request.targetId, usedAt: now,
+    }],
+    origin: "generated", generatedByCharacterId: characterId, generationPrompt: generated.prompt, sourceAppId: request.appId,
+    sourceAccountId: request.actor.type === "official" ? request.actor.officialId : request.channel === "twitter_alt" ? request.accountId : undefined,
+    createdAt: now, updatedAt: now,
+  }]);
   return {
     imageUrl: `asset://${assetId}`,
     source: "generated",
@@ -214,10 +227,8 @@ export async function resolveMediaForUse(request: MediaResolverRequest): Promise
     if (imported && strategy === "album_only") return null;
     return generateMedia(request, intentKind);
   }
-  // 没引入的角色/账号完全不读取 Photos；图片先保留文字卡，等用户主动点生图。
-  if (!imported) return socialAuto ? generateOrPlain() : { source: "text_placeholder", placeholderDescription: description };
-
-  if (strategy !== "generated_only") {
+  const generatedOnly = !imported && request.actor.type === "character" && !request.actor.photoIds;
+  if (strategy !== "generated_only" || generatedOnly) {
     if (request.actor.type === "character") {
       if (request.actor.photoIds) {
         const poolMatch = await resolveCharacterPoolPhoto(request as MediaResolverRequest & { actor: CharacterMediaActor }).catch(() => null);
@@ -237,6 +248,7 @@ export async function resolveMediaForUse(request: MediaResolverRequest): Promise
           channel: request.channel,
           targetId: request.targetId,
           accountId: request.accountId,
+          generatedOnly,
         }).catch(() => null);
         if (match) {
           if (!request.deferUsage) recordPhotoUse(match, {

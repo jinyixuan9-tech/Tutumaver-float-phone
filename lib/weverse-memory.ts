@@ -157,7 +157,7 @@ export function recordWeverseLiveParticipationEvent(input: {
   const others = (input.coParticipants || []).map((item) => cleanText(item, 60)).filter(Boolean).slice(0, 5);
   const speech = (input.ownSpeech || []).map((item) => cleanText(item, 130)).filter(Boolean).slice(-3);
   const pieces = [
-    `[Weverse LIVE ${formatChatTimestamp(timestamp)}] ${name}${input.role === "host" ? "开了" : "中途加入了"}「${community}」Community 的一场 LIVE${input.title ? `（${cleanText(input.title, 100)}）` : ""}`,
+    `[Weverse Live ${formatChatTimestamp(timestamp)}] ${name}${input.role === "host" ? "开了" : "中途加入了"}「${community}」Community 的一场 Live${input.title ? `（${cleanText(input.title, 100)}）` : ""}`,
     others.length ? `，同场还有${others.join("、")}` : "",
     speech.length ? `。期间自己说过：${speech.map((item) => `“${item}”`).join("、")}` : "",
     "。",
@@ -186,7 +186,7 @@ export function recordWeverseLiveViewerEvent(input: {
   upsert(input.characterId, {
     id: `weverse_live_viewer_${input.liveId}_${input.characterId}`,
     timestamp,
-    content: `[Weverse LIVE ${formatChatTimestamp(timestamp)}] ${name}作为普通观众看过${hosts.length ? `${hosts.join("、")}的` : "一场"}「${cleanText(input.communityName, 80) || "Community"}」LIVE${input.title ? `（${cleanText(input.title, 100)}）` : ""}${comments.length ? `，并在艺人评论里说过：${comments.map((item) => `“${item}”`).join("、")}` : ""}。`,
+    content: `[Weverse Live ${formatChatTimestamp(timestamp)}] ${name}作为普通观众看过${hosts.length ? `${hosts.join("、")}的` : "一场"}「${cleanText(input.communityName, 80) || "Community"}」Live${input.title ? `（${cleanText(input.title, 100)}）` : ""}${comments.length ? `，并在艺人评论里说过：${comments.map((item) => `“${item}”`).join("、")}` : ""}。`,
   });
 }
 

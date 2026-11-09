@@ -354,13 +354,22 @@ export function PhoneCalendarApp({
       return;
     }
     if (editingItem.externalSource === "weverse" && endDate !== startDate) {
-      onNotice?.("WVS 同步日程暂时只支持单日日程；请在 WVS 日历中调整参与成员或日期");
+      onNotice?.("Weverse 同步日程暂时只支持单日日程；请在 Weverse 日历中调整参与成员或日期");
       return;
     }
     const dayCount = Math.round((parseIsoDate(endDate).getTime() - parseIsoDate(startDate).getTime()) / 86400000) + 1;
     if (dayCount > 31) {
       onNotice?.("一次最多创建 31 天的日程");
       return;
+    }
+    if (editingItem.externalSource === "weverse" && editingItem.externalId) {
+      const result = syncCalendarProjectionBackToWeverse(editingItem.externalId, selectedOwner.ownerId, editingItem);
+      if (result) {
+        setEditingItem(null);
+        refreshPlans();
+        onNotice?.(result.pending ? "时间有冲突，已存入日历待调整行程" : "日程已保存");
+        return;
+      }
     }
     const firstWeekStart = getWeekStartIso(parseIsoDate(startDate));
     // 跨周移动：先从原来的周删除
@@ -408,10 +417,10 @@ export function PhoneCalendarApp({
     const original=loadOwnerCalendarPlans(selectedOwner.ownerType,selectedOwner.ownerId).flatMap(p=>p.items).find(i=>i.id===editingItem.id);
     if(original?.linkedLiveId){deleteWeverseLive(original.linkedLiveId);setEditingItem(null);refreshPlans();onNotice?.("直播回放及关联日程已删除");return;}
     const targetWeekStart = getWeekStartIso(parseIsoDate(editingItem.originalDate || editingItem.date));
-    if (editingItem.sharedGroupId) {
-      deleteLinkedCalendarScheduleItem(editingItem.sharedGroupId);
-    } else if (editingItem.externalSource === "weverse" && editingItem.externalId) {
+    if (editingItem.externalSource === "weverse" && editingItem.externalId) {
       removeWeverseScheduleItemEverywhere(editingItem.externalId);
+    } else if (editingItem.sharedGroupId) {
+      deleteLinkedCalendarScheduleItem(editingItem.sharedGroupId);
     } else {
       deleteCalendarScheduleItem(selectedOwner.ownerType, selectedOwner.ownerId, targetWeekStart, editingItem.id);
     }
@@ -1045,7 +1054,7 @@ export function PhoneCalendarApp({
                 <button type="button" data-active={generationExistingMode === "supplement" ? "true" : undefined} onClick={() => setGenerationExistingMode("supplement")}>在现有安排上补充</button>
                 <button type="button" data-active={generationExistingMode === "replan" ? "true" : undefined} onClick={() => setGenerationExistingMode("replan")}>重新安排 AI 日程</button>
               </div>
-              <small className="calendar-generate-hint">重新安排只替换 AI 生成项，手动和 WVS 日程保留。</small>
+              <small className="calendar-generate-hint">重新安排只替换 AI 生成项，手动和 Weverse 日程保留。</small>
             </div> : null}
             <div className="calendar-confirm-footer">
               <button type="button" className="calendar-block-btn" data-variant="ghost" onClick={() => setShowGenerateConfirm(false)}>取消</button>

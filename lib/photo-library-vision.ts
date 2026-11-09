@@ -172,7 +172,7 @@ export async function analyzePhotos(photoIds: string[], options?: { signal?: Abo
     const state = loadPhotoLibrary();
     const records = batchIds
       .map((id) => state.photos.find((photo) => photo.id === id))
-      .filter((photo): photo is PhotoRecord => Boolean(photo));
+      .filter((photo): photo is PhotoRecord => Boolean(photo && photo.origin !== "generated"));
     if (records.length === 0) continue;
     records.forEach((record) => updatePhotoRecord(record.id, { visionStatus: "pending", visionError: undefined }));
     try {

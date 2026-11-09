@@ -9,7 +9,7 @@ import {
 } from "./photo-library-storage";
 import type { PhotoRecord, PhotoSourceStrategy, PhotoUsageChannel } from "./photo-library-types";
 import { appearanceToText, photoTraitsTextForCharacter } from "./photo-library-vision";
-import { canAutoUsePhoto } from "./photo-library-usage";
+import { canAutoUsePhoto, hasPhotoMatchDescription } from "./photo-library-usage";
 
 export type PhotoResolverRequest = {
   characterId: string;
@@ -17,6 +17,7 @@ export type PhotoResolverRequest = {
   channel: PhotoUsageChannel;
   targetId?: string;
   accountId?: string;
+  generatedOnly?: boolean;
 };
 
 export type PhotoResolverMatch = {
@@ -65,6 +66,9 @@ function similarity(a: string, b: string): number {
 }
 
 function photoSearchText(photo: PhotoRecord, characterId: string): string {
+  if (photo.origin === "generated" && photo.generationPrompt) {
+    return [photo.displayName, photo.seriesId, photo.generationPrompt].filter(Boolean).join(" ");
+  }
   const mappedAppearance = photoTraitsTextForCharacter(photo, characterId);
   const peopleText = (photo.people ?? []).map((person) => [
     person.position,
@@ -152,7 +156,8 @@ export async function resolvePhotoForUse(request: PhotoResolverRequest): Promise
   const photos = loadPhotoLibrary().photos
     .filter((photo) => photo.aiUsable)
     .filter((photo) => photo.linkedCharacterIds.includes(request.characterId))
-    .filter((photo) => photo.visionStatus === "done")
+    .filter((photo) => !request.generatedOnly || photo.origin === "generated")
+    .filter(hasPhotoMatchDescription)
     .filter((photo) => canAutoUsePhoto(photo, request.characterId, request.channel, request.accountId));
   if (photos.length === 0) return null;
 

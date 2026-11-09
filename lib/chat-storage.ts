@@ -149,6 +149,7 @@ export type ChatMessage = {
         | "payment_request" | "accept_payment_request" | "decline_payment_request"
         | "music" | "music_share" | "music_notify" | "music_not_found"
         | "xiaohongshu_note_share"
+        | "weverse_live_invite"
         | "gift"
         | "chat_record"
         | "contact_card"
@@ -171,6 +172,7 @@ export type ChatMessage = {
         count?: number;           // 红包个数
         label?: string;           // 红包留言/转账备注/照片描述/位置名/表情名
         liveVideoId?: string;
+        weverseLiveInvite?: import("./weverse-live-collaboration").WeverseLiveInvite;
         liveCover?: string;
         liveDuration?: number;
         liveAudio?: string;
