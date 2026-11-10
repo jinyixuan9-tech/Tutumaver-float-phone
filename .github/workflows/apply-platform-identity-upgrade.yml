@@ -29,7 +29,7 @@ jobs:
           rm -rf .q8-platform-identity-upgrade
           mkdir -p .q8-platform-identity-upgrade
           unzip -q q8-platform-identity-upgrade.zip -d .q8-platform-identity-upgrade
-          node .q8-platform-identity-upgrade/scripts/apply.mjs
+          node .q8-platform-identity-upgrade/q8-platform-identity-upgrade/scripts/apply.mjs     
           git diff --check
 
       - name: Install dependencies and type-check the full project
