@@ -4,6 +4,7 @@ import {phoneKnowledge,applyPhoneControl,phoneTextStream} from "./checkphone-acc
 import { offlineSpeechInstruction } from "./offline-dialogue";
 import {followUpIntentInstruction,extractFollowUpIntent} from "./follow-up-intent";
 import { CHARACTER_REMARK_LANGUAGE_INSTRUCTION } from "./social-language-instructions";
+import { buildPlatformIdentityAutonomyPrompt } from "./platform-identity-storage";
 import { loadChatOfflineSceneState } from "./chat-offline-storage";
 import { buildCharacterOutputLanguageInstruction } from "./character-language";
 import { worldlineContextForApp } from "./worldline-storage";
@@ -38,9 +39,9 @@ import {
 } from "./chat-storage";
 import { extractTextToolDirectiveText, stripTextToolDirectives } from "./text-tool-protocol";
 import { applyWithProtectedAvatarDecisionMarkers, findUserAvatarChangeIntent, inferAvatarRecommendationPlatform } from "./chat-avatar-intent";
-import { buildChatProfileAutonomyPrompt, isExplicitChatProfileRequestTurn } from "./chat-profile-autonomy";
-import { buildWeverseProfileAutonomyPrompt, isExplicitWeverseProfileRequestTurn } from "./weverse-profile-autonomy";
-import { lysnProfilePrompt, explicitLysnProfileRequest } from "./lysn-profile-autonomy";
+import { isExplicitChatProfileRequestTurn } from "./chat-profile-autonomy";
+import { isExplicitWeverseProfileRequestTurn } from "./weverse-profile-autonomy";
+import { explicitLysnProfileRequest } from "./lysn-profile-autonomy";
 import { lysnPrivateChatPrompt } from "./lysn-identity";
 import type { ApiConfig, PresetConfig, Prompt, PromptOrderEntry, RegexConfig } from "./settings-types";
 import type { CustomAppPromptProfile } from "./custom-app-types";
@@ -2092,6 +2093,7 @@ export async function buildChatPromptMessages(
         });
     }
     if (!session.isGroup && !isOfflineMode && resolvedAppId === "chat") {
+        llmMessages.push({ role: "system", content: buildPlatformIdentityAutonomyPrompt(character) });
         const chatSettings = loadChatAppSettings();
         if (chatSettings.allowCharacterMeetingInvites === true) {
             const meetingInviteConfig = resolveMeetingInviteCardConfig(chatSettings);
@@ -2131,20 +2133,11 @@ export async function buildChatPromptMessages(
             ].join("\n"),
         });
     } else if (!session.isGroup && resolvedAppId === "chat" && !(options?.appTags || []).includes("offline")) {
-        if (!explicitWeverseProfileRequest) {
-            const chatProfileAutonomyPrompt = buildChatProfileAutonomyPrompt(character);
-            if (chatProfileAutonomyPrompt) {
-                llmMessages.push({ role: "system", content: chatProfileAutonomyPrompt });
-            }
-        }
-        if (!explicitChatProfileRequest) {
-            const weverseProfileAutonomyPrompt = buildWeverseProfileAutonomyPrompt(character, { explicitRequest: explicitWeverseProfileRequest });
-            if (weverseProfileAutonomyPrompt) {
-                llmMessages.push({ role: "system", content: weverseProfileAutonomyPrompt });
-            }
-        }
-        const lysnAutonomy = lysnProfilePrompt(character, explicitLysnRequest);
-        if (lysnAutonomy) llmMessages.push({ role: "system", content: lysnAutonomy });
+        // 社交平台资料统一由 Platform Identity Store + Social Avatar Library 管理。
+        // 保留显式请求识别结果供兼容路径使用，但不再注入旧 Photos 头像候选。
+        void explicitWeverseProfileRequest;
+        void explicitChatProfileRequest;
+        void explicitLysnRequest;
         const lysnIdentity = lysnPrivateChatPrompt(character.id);
         if (lysnIdentity) llmMessages.push({ role: "system", content: lysnIdentity });
     }

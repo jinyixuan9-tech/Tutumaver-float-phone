@@ -10,6 +10,8 @@
  */
 
 import type { ChatMessage } from "./chat-storage";
+import type { PlatformIdentityAction } from "./platform-identity-storage";
+import { extractPlatformIdentityUpdates } from "./platform-identity-storage";
 import type { StateValue } from "./chat-storage";
 import { parseStateValues, mergeStateValues } from "./state-value-parser";
 import { stripActionShells } from "./action-parser";
@@ -41,6 +43,10 @@ export interface ParsedAIResponse {
     innerMonologue: string;
     /** 角色在回复中主动设置的“TA 给用户的备注”；控制标记本身不展示。 */
     characterRemarkForUser?: string;
+    /** 备注依据摘要，仅记录模型引用的已有事实，不作为新记忆写入。 */
+    characterRemarkForUserBasis?: string;
+    /** 角色主动更新的独立平台资料。 */
+    platformIdentityActions?: PlatformIdentityAction[];
 }
 
 // ── Rich-media patterns (non-global, for single match with index) ──
@@ -711,13 +717,17 @@ function parseSegment(segment: string, parts: ParsedMessagePart[]) {
 // ── Main parser ──────────────────────────────────────────
 
 export function parseAIResponse(rawText: string, previousState: StateValue[]): ParsedAIResponse {
+    const platformIdentityExtraction = extractPlatformIdentityUpdates(rawText);
     const acceptedAvatarRecommendation = /[\[【]\s*接受头像推荐\s*[\]】]/.test(rawText);
     const declinedAvatarRecommendation = /[\[【]\s*拒绝头像推荐\s*[\]】]/.test(rawText);
     const characterRemarkMatch = rawText.match(/[\[【]\s*(?:给用户备注|给你备注|用户备注)\s*[：:]\s*([^\]】\n]{1,40})\s*[\]】]/);
-    const characterRemarkForUser = characterRemarkMatch?.[1]?.trim();
+    const characterRemarkCandidate = characterRemarkMatch?.[1]?.trim();
+    const remarkBasisMatch = rawText.match(/[\[【]\s*备注依据\s*[：:]\s*([^\]】\n]{1,100})\s*[\]】]/);
+    const characterRemarkForUserBasis = remarkBasisMatch?.[1]?.trim();
+    const characterRemarkForUser = characterRemarkForUserBasis ? characterRemarkCandidate : undefined;
     // 0. FIRST: extract ```html blocks and <style>+HTML before any processing
     const htmlBlockPlaceholders: { placeholder: string; original: string }[] = [];
-    let protected_ = rawText;
+    let protected_ = platformIdentityExtraction.cleanedText;
     // Protect ```html...``` blocks
     protected_ = protected_.replace(/```html\s*\n[\s\S]*?```/g, (match) => {
         const placeholder = `\x00HTML_BLOCK_${htmlBlockPlaceholders.length}\x00`;
@@ -755,6 +765,7 @@ export function parseAIResponse(rawText: string, previousState: StateValue[]): P
     let actionCleaned = stripActionShells(meetingInvite.cleaned)
         .replace(/[\[【]\s*(?:接受|拒绝)头像推荐\s*[\]】]/g, "")
         .replace(/[\[【]\s*(?:给用户备注|给你备注|用户备注)\s*[：:]\s*[^\]】\n]{1,40}\s*[\]】]/g, "")
+        .replace(/[\[【]\s*备注依据\s*[：:]\s*[^\]】\n]{1,100}\s*[\]】]/g, "")
         .trim();
     // 模型只返回控制标记时也保留一条自然可见的答复；否则没有消息落库，
     // 共享消息层便无法执行这次头像选择。
@@ -820,5 +831,7 @@ export function parseAIResponse(rawText: string, previousState: StateValue[]): P
         statusPanel: restore(status.content),
         innerMonologue: restore(mono.content),
         characterRemarkForUser,
+        characterRemarkForUserBasis,
+        platformIdentityActions: platformIdentityExtraction.actions,
     };
 }

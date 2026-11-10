@@ -29,6 +29,7 @@ import { cleanStreamText, splitStreamPreviewSegments, stripLiteralTexts, stripXm
 import type { StateValue } from "@/lib/chat-storage";
 import { parseStateValues, mergeStateValues } from "@/lib/state-value-parser";
 import { parseAIResponse, type ParsedMessagePart } from "@/lib/rich-message-parser";
+import { applyPlatformIdentityAction } from "@/lib/platform-identity-storage";
 import { isKnownStickerLabel, findStickerByName } from "@/lib/sticker-data";
 import { findCustomStickerByName } from "@/lib/custom-sticker-storage";
 import { translateReasoningText } from "@/lib/reasoning-translate";
@@ -3010,7 +3011,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             ? getLatestStateValues(session.id)
             : getLatestCharacterStateValues(session.contactId);
 
-        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue, characterRemarkForUser } = parseAIResponse(aiResponseText, previousState);
+        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue, characterRemarkForUser, characterRemarkForUserBasis, platformIdentityActions } = parseAIResponse(aiResponseText, previousState);
+        if (!session.isGroup && character?.id && platformIdentityActions?.length) {
+            for (const action of platformIdentityActions) applyPlatformIdentityAction(character.id, action);
+        }
         if (!session.isGroup && characterRemarkForUser) {
             const normalizedRemark = characterRemarkForUser.replace(/[\r\n]/g, " ").trim().slice(0, 20);
             if (normalizedRemark) {
@@ -3022,12 +3026,14 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         ...sessions[index],
                         characterRemarkForUser: normalizedRemark,
                         characterRemarkForUserUpdatedAt: updatedAt,
+                        characterRemarkForUserBasis: characterRemarkForUserBasis?.replace(/[\r\n]/g, " ").trim().slice(0, 50) || undefined,
                     };
                     saveChatSessions(sessions);
                 }
                 Object.assign(session, {
                     characterRemarkForUser: normalizedRemark,
                     characterRemarkForUserUpdatedAt: updatedAt,
+                    characterRemarkForUserBasis: characterRemarkForUserBasis?.replace(/[\r\n]/g, " ").trim().slice(0, 50) || undefined,
                 });
                 window.dispatchEvent(new CustomEvent("chat-character-remark-updated", {
                     detail: { sessionId: session.id, remark: normalizedRemark, updatedAt },

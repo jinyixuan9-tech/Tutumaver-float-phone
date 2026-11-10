@@ -1,4 +1,6 @@
 import type { Character } from "./character-types";
+import { getPlatformIdentity, resolveDefaultPlatformDisplayName } from "./platform-identity-storage";
+import { getDefaultSocialAvatarAsset } from "./social-avatar-library";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { getChatImageFromIndexedDB } from "./chat-asset-storage";
 
@@ -191,17 +193,20 @@ export function resetChatCharacterProfile(characterId: string): void {
 
 export function resolveChatCharacterDisplayName(character: Pick<Character, "id" | "name"> | null | undefined): string {
   if (!character) return "";
-  return getChatCharacterProfile(character.id)?.displayName?.trim() || character.name;
+  const legacyName = getChatCharacterProfile(character.id)?.displayName?.trim();
+  return getPlatformIdentity(character.id, "chat")?.displayName?.trim() || (legacyName && legacyName !== character.name ? legacyName : resolveDefaultPlatformDisplayName(character.id, "chat"));
 }
 
 export function resolveChatCharacterAvatar(character: Pick<Character, "id" | "avatar"> | null | undefined): string | null {
   if (!character) return null;
+  const platformAvatar = getPlatformIdentity(character.id, "chat")?.avatarUrl;
+  if (platformAvatar) return platformAvatar;
   const avatarUrl = getChatCharacterProfile(character.id)?.avatarUrl;
   if (avatarUrl?.startsWith("asset://")) {
     // v0.4.0/0.4.1 曾把 Photos 的内部 asset:// 直接写进 Profile，浏览器 img 无法显示。
     // 先回退默认头像，同时后台一次性把旧引用迁成可显示的压缩 Data URL。
     hydrateLegacyAssetAvatar(character.id, avatarUrl);
-    return character.avatar || null;
+    return getDefaultSocialAvatarAsset(character.id, "chat")?.url || null;
   }
-  return avatarUrl || character.avatar || null;
+  return avatarUrl || getDefaultSocialAvatarAsset(character.id, "chat")?.url || character.avatar || null;
 }

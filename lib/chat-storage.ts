@@ -58,6 +58,8 @@ export type ChatSession = {
     /** 角色在自己的手机里给用户保存的私聊备注。 */
     characterRemarkForUser?: string;
     characterRemarkForUserUpdatedAt?: string;
+    /** 最近一次备注的依据摘要；只保存模型引用的真实已知事实。 */
+    characterRemarkForUserBasis?: string;
     /** 用户更换当前会话头像后是否通知角色。未设置时默认开启 */
     notifyCharacterOnUserAvatarChange?: boolean;
     autoReplied?: boolean; // Whether the initial greeting auto-reply has been triggered

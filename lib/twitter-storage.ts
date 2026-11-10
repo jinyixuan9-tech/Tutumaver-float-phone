@@ -6,6 +6,8 @@ import { resolveUserIdentity } from "./settings-storage";
 import type { PhotoStorySnapshot } from "./photo-story-data";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import type { RoleSocialSources } from "./role-social-sources";
+import { getPlatformIdentity, resolveDefaultPlatformDisplayName } from "./platform-identity-storage";
+import { getDefaultSocialAvatarAsset } from "./social-avatar-library";
 
 export const TWITTER_STORAGE_KEY = "ai_phone_twitter_v1";
 export const TWITTER_UPDATED_EVENT = "twitter-updated";
@@ -199,6 +201,16 @@ export function loadTwitterState(): TwitterState {
       alternateMediaPhotoIds: row.alternateMediaPhotoIds && typeof row.alternateMediaPhotoIds === "object" && !Array.isArray(row.alternateMediaPhotoIds) ? row.alternateMediaPhotoIds : {},
     };
     if(Object.values(profiles).some(p=>p.enabled===undefined)) kvSet(TWITTER_STORAGE_KEY,JSON.stringify(migrated));
+    const charactersById = new Map(loadCharacters().map((row) => [row.id, row]));
+    for (const [characterId, profile] of Object.entries(migrated.characterProfiles)) {
+      const identity = getPlatformIdentity(characterId, "twitter");
+      const character = charactersById.get(characterId);
+      const name = identity?.displayName || (character && (!profile.name || profile.name === character.name) ? resolveDefaultPlatformDisplayName(characterId, "twitter") : profile.name);
+      const avatarUrl = identity?.avatarUrl || profile.avatarUrl || getDefaultSocialAvatarAsset(characterId, "twitter")?.url;
+      migrated.characterProfiles[characterId] = { ...profile, name, avatarUrl };
+      // Posts resolve the primary account before characterProfiles; keep those two views aligned.
+      if (migrated.accounts[characterId]) migrated.accounts[characterId] = { ...migrated.accounts[characterId], name, avatarUrl };
+    }
     return migrated;
   } catch { return blankState(); }
 }

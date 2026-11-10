@@ -2,6 +2,8 @@ import { reconcileCalendarMaster } from "./calendar-master";
 import type { PhotoStorySnapshot } from "./photo-story-data";
 import { deleteWeverseLiveMemory } from "./weverse-memory";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
+import { getPlatformIdentity, resolveDefaultPlatformDisplayName } from "./platform-identity-storage";
+import { getDefaultSocialAvatarAsset } from "./social-avatar-library";
 
 export const WEV_STATE_KEY = "ai_phone_weverse_state_v1";
 export const WEV_UPDATED_EVENT = "weverse-updated";
@@ -327,7 +329,29 @@ function normalizeState(raw: unknown): WeverseState {
   const schedules = Array.isArray((source as any).schedules) ? (source as any).schedules.map(normalizeSchedule).filter((v: WeverseScheduleItem | null): v is WeverseScheduleItem => Boolean(v)) : [];
   return { version: 8, communities, posts, notices, lives, schedules, userProfile: source.userProfile && typeof source.userProfile === "object" ? source.userProfile as WeverseUserProfile : {}, settings: normalizeSettings(source.settings) };
 }
-export function loadWeverseState(): WeverseState { reconcileCalendarMaster(); if (typeof window === "undefined") return EMPTY_STATE; try { const raw=kvGet(WEV_STATE_KEY); return raw ? normalizeState(JSON.parse(raw)) : cloneEmpty(); } catch { return cloneEmpty(); } }
+export function loadWeverseState(): WeverseState {
+  reconcileCalendarMaster();
+  if (typeof window === "undefined") return EMPTY_STATE;
+  try {
+    const raw = kvGet(WEV_STATE_KEY);
+    const state = raw ? normalizeState(JSON.parse(raw)) : cloneEmpty();
+    const communities = state.communities.map((community) => {
+      const memberProfiles = { ...community.memberProfiles };
+      for (const characterId of community.memberCharacterIds) {
+        const identity = getPlatformIdentity(characterId, "weverse");
+        const previous = memberProfiles[characterId] || { characterId };
+        memberProfiles[characterId] = {
+          ...previous,
+          displayName: identity?.displayName || previous.displayName || resolveDefaultPlatformDisplayName(characterId, "weverse"),
+          avatarUrl: identity?.avatarUrl || previous.avatarUrl || getDefaultSocialAvatarAsset(characterId, "weverse")?.url,
+          characterId,
+        };
+      }
+      return { ...community, memberProfiles };
+    });
+    return { ...state, communities };
+  } catch { return cloneEmpty(); }
+}
 export function saveWeverseState(state: WeverseState): WeverseState { const normalized=normalizeState(state); if (typeof window !== "undefined") { kvSet(WEV_STATE_KEY, JSON.stringify(normalized)); reconcileCalendarMaster(); window.dispatchEvent(new CustomEvent(WEV_UPDATED_EVENT)); } return typeof window!=="undefined"?normalizeState(JSON.parse(kvGet(WEV_STATE_KEY)||JSON.stringify(normalized))):normalized; }
 export function updateWeverseUserProfile(patch: Partial<WeverseUserProfile>): WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,userProfile:{...(state.userProfile||{}),...patch}}); }
 

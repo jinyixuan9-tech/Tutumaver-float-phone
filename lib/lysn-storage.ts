@@ -1,5 +1,7 @@
 import type { PhotoStorySnapshot } from "./photo-story-data";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
+import { getPlatformIdentity, resolveDefaultPlatformDisplayName } from "./platform-identity-storage";
+import { getDefaultSocialAvatarAsset } from "./social-avatar-library";
 
 export const LYSN_KEY = "ai_phone_lysn_v1";
 export const LYSN_EVENT = "lysn-updated";
@@ -60,6 +62,23 @@ export type LysnState = {
   userProfile: LysnUserProfile; settings: LysnSettings;
 };
 const empty = (): LysnState => ({ version: 1, subscribedIds: [], profiles: {}, messages: [], readAt: {}, subscribedAt: {}, lastAutoAt: {}, rooms: {}, userProfile: { ...DEFAULT_LYSN_USER }, settings: { ...DEFAULT_LYSN_SETTINGS } });
+function overlayLysnProfiles(raw: unknown, subscribedIds: unknown): Record<string, LysnProfile> {
+  const profiles: Record<string, LysnProfile> = raw && typeof raw === "object" && !Array.isArray(raw) ? { ...(raw as Record<string, LysnProfile>) } : {};
+  const ids = new Set<string>([
+    ...Object.keys(profiles),
+    ...(Array.isArray(subscribedIds) ? subscribedIds.filter((id): id is string => typeof id === "string") : []),
+  ]);
+  for (const characterId of ids) {
+    const identity = getPlatformIdentity(characterId, "lysn");
+    const previous = profiles[characterId] || { name: "", avatar: "", updatedAt: 0 };
+    profiles[characterId] = {
+      ...previous,
+      name: identity?.displayName || previous.name || resolveDefaultPlatformDisplayName(characterId, "lysn"),
+      avatar: identity?.avatarUrl || previous.avatar || getDefaultSocialAvatarAsset(characterId, "lysn")?.url || "",
+    };
+  }
+  return profiles;
+}
 export function loadLysn(): LysnState {
   try {
     const value = kvGet(LYSN_KEY);
@@ -68,7 +87,7 @@ export function loadLysn(): LysnState {
     return {
       version: 1,
       subscribedIds: Array.isArray(parsed.subscribedIds) ? parsed.subscribedIds.filter((x): x is string => typeof x === "string") : [],
-      profiles: parsed.profiles && typeof parsed.profiles === "object" ? parsed.profiles : {},
+      profiles: overlayLysnProfiles(parsed.profiles, parsed.subscribedIds),
       messages: Array.isArray(parsed.messages) ? parsed.messages.filter(x => x && typeof x.id === "string" && typeof x.characterId === "string" && !(x.sender === "system" && (x.original === "🎂 生日快乐！今天是你的特别日子。" || /^💜 今天是你订阅这间聊天室的第 \d+ 天！/.test(x.original)))) : [],
       readAt: parsed.readAt && typeof parsed.readAt === "object" ? parsed.readAt : {},
       subscribedAt: parsed.subscribedAt && typeof parsed.subscribedAt === "object" ? parsed.subscribedAt : {},

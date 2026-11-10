@@ -4,7 +4,7 @@
 import type { MomentPost, MomentComment, AIMomentSchedule, PendingReaction } from "./moments-types";
 import { loadCharacters } from "./character-storage";
 import { loadChatContacts } from "./chat-storage";
-import { resolveChatCharacterDisplayName } from "./chat-profile-storage";
+import { resolvePlatformIdentity } from "./platform-identity-storage";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { DEFAULT_MOMENTS_BILINGUAL_PROMPT } from "./bilingual-prompt-defaults";
 import { canCharacterSeeMomentPost, getVisibleMomentCommentsForCharacter } from "./character-world-storage";
@@ -416,7 +416,7 @@ export function getUnreadMomentsNotifications(): { authorName: string; content: 
         const candidates = chars.filter(ch => ch.id === c.authorId || (c.authorType === "npc" && ch.name === c.authorName));
         const character = candidates.length === 1 ? candidates[0] : undefined;
         if (character && (c.authorType === "character" || c.authorType === "npc")) {
-            return loadChatContacts().find(contact => contact.characterId === character.id)?.nickname?.trim() || resolveChatCharacterDisplayName(character);
+            return loadChatContacts().find(contact => contact.characterId === character.id)?.nickname?.trim() || resolvePlatformIdentity(character, "moments").displayName;
         }
         return c.authorName || c.authorId;
     };
