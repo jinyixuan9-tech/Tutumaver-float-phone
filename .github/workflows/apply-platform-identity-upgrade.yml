@@ -1,0 +1,56 @@
+name: Apply q8 Platform Identity Upgrade
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  apply-and-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Unpack and apply patch
+        run: |
+          test -f q8-platform-identity-upgrade.zip
+          rm -rf .q8-platform-identity-upgrade
+          mkdir -p .q8-platform-identity-upgrade
+          unzip -q q8-platform-identity-upgrade.zip -d .q8-platform-identity-upgrade
+          node .q8-platform-identity-upgrade/scripts/apply.mjs
+          git diff --check
+
+      - name: Install dependencies and type-check the full project
+        run: |
+          npm ci
+          npm run typecheck
+
+      - name: Create review branch and pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="feature/platform-identity-upgrade-${GITHUB_RUN_NUMBER}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add lib components
+          git diff --cached --quiet && { echo "No source changes detected."; exit 1; }
+          git commit -m "Add independent platform identities and evidence-based remarks"
+          git push --set-upstream origin "$branch"
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "Add independent platform identities and evidence-based remarks" \
+            --body "This PR applies the q8 platform identity patch. It adds a separate platform identity store and non-character avatar library, wires supported existing profile stores, and requires a separate remark-basis marker before a new private-chat remark is saved. The campus forum's real app ID/renderer was not identified, so its adapter still needs to pass its existing fixed anonymous/student ID to resolvePlatformIdentity. Custom app renderers must call the exported resolver to display their per-app profile. Please review the changed files and the Actions type-check result before merging."
