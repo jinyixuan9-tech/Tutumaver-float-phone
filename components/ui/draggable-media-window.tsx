@@ -1,0 +1,8 @@
+"use client";
+import {useRef,useState,useEffect,type ReactNode} from 'react';
+import {createPortal} from 'react-dom';
+export function DraggableMediaWindow({label,onOpen,children,style,initialTop=120}:{label:string;onOpen?:()=>void;children:ReactNode;style?:React.CSSProperties;initialTop?:number}){
+ const [point,setPoint]=useState<{x:number;y:number}|null>(null),drag=useRef<{x:number;y:number;left:number;top:number;moved:boolean}|null>(null),suppress=useRef(false);
+ const [host,setHost]=useState<Element|null>(null);useEffect(()=>{setHost(document.querySelector('.phone-shell'));},[]);if(!host)return null;
+ return createPortal(<button type="button" className="call-mini-window" aria-label={label} title={label} style={{...style,position:'absolute',transform:'none',zIndex:11000,top:point?.y??initialTop,left:point?.x??12,right:'auto',touchAction:'none',userSelect:'none'}} onPointerDown={e=>{e.stopPropagation();const r=e.currentTarget.getBoundingClientRect(),h=host.getBoundingClientRect();drag.current={x:e.clientX,y:e.clientY,left:r.left-h.left,top:r.top-h.top,moved:false};suppress.current=false;e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{const d=drag.current;if(!d)return;const dx=e.clientX-d.x,dy=e.clientY-d.y;if(Math.hypot(dx,dy)>6)d.moved=true;if(d.moved){const r=host.getBoundingClientRect();setPoint({x:Math.max(0,Math.min(r.width-e.currentTarget.offsetWidth,d.left+dx)),y:Math.max(0,Math.min(r.height-e.currentTarget.offsetHeight,d.top+dy))});}}} onPointerUp={()=>{suppress.current=!!drag.current?.moved;drag.current=null;}} onPointerCancel={()=>{suppress.current=true;drag.current=null;}} onClick={e=>{e.stopPropagation();if(suppress.current){suppress.current=false;return;}onOpen?.();}}>{children}</button>,host);
+}

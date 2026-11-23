@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">兔版float</string>
+    <string name="title_activity_main">兔版float</string>
+    <string name="package_name">tutumaver.float.phone</string>
+    <string name="custom_url_scheme">tutumaver.float.phone</string>
+</resources>

@@ -1,0 +1,6 @@
+const fs=require('fs'),vm=require('vm'),ts=require('typescript'),assert=require('node:assert/strict');
+const config={enabled:true,anxietyMinDelay:30,anxietyMaxDelay:120},box={exports:{},Map,Number,Math,require:()=>({loadFollowUpConfig:()=>config})};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/follow-up-intent.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,box);const api=box.exports;
+assert(api.followUpIntentInstruction().includes('不需要就完全不输出'));assert.equal(api.extractFollowUpIntent('s','晚安'),'晚安');assert.equal(api.takeFollowUpIntent('s'),undefined);
+assert.equal(api.extractFollowUpIntent('s','等你 <followup seconds="60"/>'),'等你 ');assert.equal(api.takeFollowUpIntent('s'),60);assert.equal(api.takeFollowUpIntent('s'),undefined);api.extractFollowUpIntent('s','<followup seconds="999"/>');assert.equal(api.takeFollowUpIntent('s'),120);api.extractFollowUpIntent('s','<followup seconds="0"/>');assert.equal(api.takeFollowUpIntent('s'),undefined);config.enabled=false;assert.equal(api.followUpIntentInstruction(),'');api.extractFollowUpIntent('s','<followup seconds="60"/>');assert.equal(api.takeFollowUpIntent('s'),undefined);
+console.log('PASS: no marker means no follow-up; metadata removed from text; bounds; one-shot plans; disabled prompt and scheduling.');

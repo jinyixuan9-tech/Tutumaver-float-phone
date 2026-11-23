@@ -1,0 +1,105 @@
+name: Validate share Browser integration
+on:
+  push:
+    branches: [main, 'sync/full-080-applicable']
+    paths:
+      - "components/browser/**"
+      - "components/checkphone/**"
+      - "components/desktop-shell.tsx"
+      - "components/settings/binding-manager.tsx"
+      - "lib/browser-collection.ts"
+      - "lib/builtin-preset.ts"
+      - "lib/checkphone-*.ts"
+      - "lib/desktop-config.ts"
+      - "lib/settings-storage.ts"
+      - "lib/chat-engine.ts"
+      - "lib/chat-storage.ts"
+      - "lib/chat-call-archives.ts"
+      - "lib/llm-prompt-assembler.ts"
+      - "lib/group-chat-engine.ts"
+      - "lib/push-outbox-client.ts"
+      - "lib/personal-push-cloud.ts"
+      - "app/api/push/deploy-personal/route.ts"
+      - "components/phone-settings-app.tsx"
+      - "scripts/build-personal-push-dist.mjs"
+      - "scripts/check-personal-push-dist.mjs"
+      - "lib/reverse-phone-*.ts"
+      - "lib/secret-phone-inspection.ts"
+      - "lib/phone-inspection-settings.ts"
+      - "scripts/check-browser-009.cjs"
+      - "scripts/check-inspection-revocation.cjs"
+      - "lib/short-term-assembler.ts"
+      - "components/chat/reverse-phone-overlay.tsx"
+      - ".github/workflows/share-browser-check.yml"
+      - "components/chat/**"
+      - "components/lysn/**"
+      - "components/twitter/**"
+      - "components/diary/**"
+      - "components/media/**"
+      - "components/photos/**"
+      - "styles/**"
+      - "lib/offline-*.ts"
+      - "lib/chat-offline-storage.ts"
+      - "lib/media-preferences.ts"
+      - "lib/browser-video-share.ts"
+      - "lib/text-image-mask.ts"
+      - "lib/image-prompt-language.ts"
+      - "components/settings/**"
+      - "lib/shared-snapshot.ts"
+      - "lib/media-resolver.ts"
+      - "lib/image-generation-service.ts"
+      - "lib/android-native-api.ts"
+      - "lib/chat-offline-scene-memory.ts"
+      - "lib/api-helpers.ts"
+      - "lib/settings-types.ts"
+      - "app/api/image-generation/**"
+      - "lib/photo-library-*.ts"
+      - "lib/text-image-storage.ts"
+      - "lib/elevenlabs-models.ts"
+      - "scripts/check-resource076-music.cjs"
+      - "scripts/check-resource077.cjs"
+      - "scripts/check-share080-preset.cjs"
+      - "lib/chat-share.ts"
+      - "lib/novel-engine.ts"
+      - "lib/icity-share.ts"
+      - "components/weverse/**"
+      - "components/question-box/**"
+      - "components/theqoo/**"
+      - "components/xiaohongshu/**"
+      - "scripts/check-offline-speech-scenes.cjs"
+  workflow_dispatch:
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: TypeScript check
+        run: npm run typecheck
+      - name: Next.js production build
+        run: npm run build
+      - name: Resource 080 built-in Chat preset migration
+        run: node scripts/check-share080-preset.cjs
+      - name: Browser regression checks
+        run: node scripts/check-browser-009.cjs
+      - name: Phone inspection revocation regression
+        run: node scripts/check-inspection-revocation.cjs
+      - name: Resource 077 Browser and text-image regression
+        run: node scripts/check-resource077.cjs
+      - name: Offline music context regression
+        run: node scripts/check-resource076-music.cjs
+      - name: Offline scenes regression
+        run: node scripts/check-offline-speech-scenes.cjs
+      - name: Cross-app memory regression
+        run: npm run check:memory
+      - name: Share Kakao and plugin compatibility
+        run: node scripts/check-share-kakao.cjs
+      - name: Share shell speech compatibility
+        run: node scripts/check-share-shell-speech.cjs
+      - name: Android web bundle
+        run: npm run android:web

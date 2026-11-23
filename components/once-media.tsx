@@ -1,0 +1,20 @@
+'use client';
+import {useEffect,useRef,useState} from 'react';
+import {getChatImageFromIndexedDB} from '@/lib/chat-asset-storage';
+import {consumeMediaSent,decodeGif,type SocialMedia} from '@/lib/social-media';
+export function OnceMedia({media,mediaKey,onPreview,className='',naturalRatio=false}:{media:SocialMedia;mediaKey:string;onPreview?:()=>void;className?:string;naturalRatio?:boolean}){
+ const [src,setSrc]=useState(''),[playing,setPlaying]=useState(false),[error,setError]=useState('');const video=useRef<HTMLVideoElement>(null),canvas=useRef<HTMLCanvasElement>(null),timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),run=useRef(0),mounted=useRef(true),frames=useRef<Awaited<ReturnType<typeof decodeGif>>|null>(null),playingRef=useRef(false),suppressClick=useRef(false);
+ useEffect(()=>{mounted.current=true;void getChatImageFromIndexedDB(media.assetId).then(u=>{if(mounted.current)setSrc(u||'');});return()=>{mounted.current=false;run.current++;clearTimeout(timer.current);};},[media.assetId]);
+ async function play(auto=false){if(playingRef.current)return;suppressClick.current=false;setError('');if(!src)return;playingRef.current=true;setPlaying(true);const token=++run.current;
+ try{if(media.kind==='live'){if(video.current){video.current.muted=auto || media.muted!==false;video.current.currentTime=0;await video.current.play();}return;}
+ const g=frames.current||await decodeGif(await(await fetch(src)).arrayBuffer());frames.current=g;if(!mounted.current||token!==run.current)return;const c=canvas.current!,ctx=c.getContext('2d')!;c.width=g.width;c.height=g.height;const patch=document.createElement('canvas'),pc=patch.getContext('2d')!;let i=0,previous:typeof g.frames[number]|undefined,snapshot:ImageData|undefined;
+ const tick=()=>{if(!mounted.current||token!==run.current)return;if(i>=g.frames.length){playingRef.current=false;setPlaying(false);return;}const f=g.frames[i++];if(previous?.disposalType===2)ctx.clearRect(previous.dims.left,previous.dims.top,previous.dims.width,previous.dims.height);if(previous?.disposalType===3&&snapshot)ctx.putImageData(snapshot,0,0);if(f.disposalType===3)snapshot=ctx.getImageData(0,0,c.width,c.height);patch.width=f.dims.width;patch.height=f.dims.height;pc.putImageData(new ImageData(new Uint8ClampedArray(f.patch!),f.dims.width,f.dims.height),0,0);ctx.drawImage(patch,f.dims.left,f.dims.top);previous=f;timer.current=setTimeout(tick,Math.max(20,f.delay||100));};tick();
+ }catch{playingRef.current=false;setPlaying(false);setError('无法播放，请重试');}}
+ useEffect(()=>{if(src&&consumeMediaSent(mediaKey))void play(true);},[src,mediaKey]);
+ return <div className={'once-media '+className} style={{position:'relative',width:'100%',maxWidth:420,overflow:'hidden',borderRadius:12}} onClick={e=>{e.stopPropagation();if(media.kind==='gif')void play();else onPreview?.();}}>
+ <img src={media.cover} alt={media.kind==='gif'?'GIF':'实况封面'} style={{display:playing?'none':'block',width:'100%',maxHeight:naturalRatio?undefined:360,objectFit:'contain'}}/>
+ {media.kind==='live'?<video ref={video} src={src||undefined} playsInline muted={media.muted!==false} preload="metadata" onEnded={()=>{playingRef.current=false;setPlaying(false);}} onError={()=>{playingRef.current=false;setPlaying(false);setError('无法播放此视频');}} style={{display:playing?'block':'none',width:'100%',maxHeight:naturalRatio?undefined:360}}/>:<canvas ref={canvas} style={{display:playing?'block':'none',width:'100%',maxHeight:naturalRatio?undefined:360,objectFit:'contain'}}/>}
+ {media.kind==='live'&&<button type="button" aria-label="播放一次实况" style={{position:'absolute',right:7,bottom:7,border:0,borderRadius:10,padding:'4px 8px',background:'#0009',color:'white',fontSize:12}} onPointerDown={e=>{e.stopPropagation();if(e.pointerType==='touch'){suppressClick.current=true;void play();suppressClick.current=true;}}} onClick={e=>{e.stopPropagation();if(suppressClick.current){suppressClick.current=false;return;}void play();}}>◉ 实况 · {media.duration.toFixed(1)}秒</button>}
+ {error&&<span role="status">{error}</span>}
+ </div>;
+}

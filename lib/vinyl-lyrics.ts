@@ -1,0 +1,3 @@
+export type VinylLyric={time:number;text:string};
+export function parseVinylLyrics(lrc:string):VinylLyric[]{const result:VinylLyric[]=[];const offset=Number(lrc.match(/\[offset:([+-]?\d+)\]/i)?.[1]||0)/1000;for(const row of lrc.split(/\r?\n/)){const matches=[...row.matchAll(/\[(\d+):(\d+(?:\.\d+)?)\]/g)];const text=row.replace(/\[[^\]]*\]/g,'').trim();if(!text)continue;for(const stamp of matches){const time=Number(stamp[1])*60+Number(stamp[2])+offset;if(Number.isFinite(time))result.push({time:Math.max(0,time),text})}}return result.sort((a,b)=>a.time-b.time)}
+export function activeVinylLyric(lines:VinylLyric[],time:number){let active=-1;for(let i=0;i<lines.length;i++){if(lines[i].time>time)break;active=i}return active}

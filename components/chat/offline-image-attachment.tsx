@@ -1,0 +1,57 @@
+'use client';
+import {useEffect,useRef,useState} from 'react';
+import {createPortal} from 'react-dom';
+import {Plus,X} from 'lucide-react';
+import type {ChatOfflineImage} from '@/lib/chat-offline-storage';
+import {saveChatImageToIndexedDB,getChatImageFromIndexedDB} from '@/lib/chat-asset-storage';
+import {TextImage} from '@/components/media/text-image';
+import {suggestOfflineImagePrompt} from '@/lib/offline-image-rules';
+import {loadChatOfflineTurns} from '@/lib/chat-offline-storage';
+import type {ChatSession} from '@/lib/chat-storage';
+import {loadApiConfigs,loadBindingConfig,resolveBinding} from '@/lib/settings-storage';
+import {generateImageFromConfiguredApi} from '@/lib/image-generation-service';
+import {describeOfflinePhoto} from '@/lib/photo-library-vision';
+import {useOfflineImageUrl} from './offline-image-url';
+type Target={turnId:string;role:'user'|'assistant'};
+export function OfflineImageAttachment({image,turnId,role,characterId,onChange}:{image:ChatOfflineImage;turnId:string;role:'user'|'assistant';characterId:string;onChange:(image:ChatOfflineImage)=>void}){
+ return <div className="offline-inline-image" onPointerDown={e=>e.stopPropagation()} onContextMenu={e=>e.stopPropagation()}><TextImage appId="offline-chat" contentId={`${turnId}:${role}:${image.id||'legacy'}`} prompt={image.prompt} initialRef={image.ref} characterId={role==='assistant'?characterId:undefined} className="offline-inline-image-preview" offlineActions onApply={(ref,prompt)=>onChange({...image,ref,prompt,description:undefined,recognition:'direct'})}/></div>;
+}
+export function OfflinePendingImage({image,onRemove,onTargetChange,disabled=false}:{image:ChatOfflineImage;disabled?:boolean;onRemove:()=>void;onTargetChange:(role:'user'|'assistant')=>void}){const url=useOfflineImageUrl(image.ref);return <div className="offline-image-draft"><div className="offline-image-draft-thumb">{url?<img src={url} alt="待发送图片"/>:<span>文字图</span>}</div><div><strong>{image.usage==='decoration'?'氛围配图':image.usage==='scene'?'剧情参考':'角色互动'} · 待发送</strong><select disabled={disabled} aria-label="待发送图片附加目标" value={image.targetRole||'user'} onChange={e=>onTargetChange(e.target.value as 'user'|'assistant')}><option value="user">下一条我方内容</option><option value="assistant">下一轮对方内容</option></select></div><button type="button" disabled={disabled} aria-label="移除待发送图片" onClick={onRemove}><X size={16}/></button></div>;}
+export function OfflineImageComposeDialog({target,recent,allowNext=false,session,characterId,onClose,onCreate}:{target:Target|null;recent:Array<{turnId:string;role:'user'|'assistant';label:string}>;allowNext?:boolean;session:ChatSession;characterId:string;onClose:()=>void;onCreate:(target:Target,image:ChatOfflineImage)=>void}){
+ const [mode,setMode]=useState<'choose'|'decoration'|'ai'>(target?'decoration':'choose');
+ const [targetRole,setTargetRole]=useState<'user'|'assistant'>(target?.role||'user');
+ const [source,setSource]=useState<'album'|'generate'>('album'),[ref,setRef]=useState<string>(),[preview,setPreview]=useState<string>();
+ const [prompt,setPrompt]=useState(''),[description,setDescription]=useState(''),[recognition,setRecognition]=useState<'direct'|'manual'>('direct');
+ const [includeUserReference,setIncludeUserReference]=useState(false),[omitCharacterReference,setOmitCharacterReference]=useState(false);
+ const [usage,setUsage]=useState<'scene'|'interactive'>('scene'),[future,setFuture]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[floorsOpen,setFloorsOpen]=useState(false);
+ const turns=loadChatOfflineTurns(session.id),floors=turns.length*2;
+ const [from,setFrom]=useState(Math.max(1,floors-1)),[to,setTo]=useState(Math.max(1,floors));
+ const [host,setHost]=useState<HTMLElement|null>(null),[dark,setDark]=useState(false);const input=useRef<HTMLInputElement>(null),dialog=useRef<HTMLElement>(null);const mounted=useRef(true);const url=useOfflineImageUrl(preview||ref);
+ useEffect(()=>{mounted.current=true;const h=document.querySelector<HTMLElement>('.chat-room-wrapper[data-offline-notes="true"]');setHost(h);const root=h?.closest('.chat-app');const sync=()=>setDark(root?.getAttribute('data-chat-theme')==='dark');sync();const observer=new MutationObserver(sync);if(root)observer.observe(root,{attributes:true,attributeFilter:['data-chat-theme']});dialog.current?.focus();return()=>{mounted.current=false;observer.disconnect();};},[]);
+ useEffect(()=>{dialog.current?.focus();},[host]);
+ const run=async(fn:()=>Promise<void>)=>{if(busy)return;setBusy(true);setError('');try{await fn();}catch(e){if(mounted.current)setError(e instanceof Error?e.message:'操作失败');}finally{if(mounted.current)setBusy(false);}};
+ const add=(imageRef=ref)=>{if(!imageRef&&!prompt.trim())return;const ai=mode==='ai'||future;const binding=resolveBinding(loadBindingConfig(),session.isGroup?undefined:session.contactId,session.isGroup?'group_chat':'chat');const config=loadApiConfigs().find(c=>c.id===binding.apiConfigId);
+  if(ai&&recognition==='direct'&&imageRef&&!config?.enableImageRecognition){setError('当前文字 API 未开启图像识别，请点击手动识图，或在 API 设置中启用识图');return;}
+  if(ai&&recognition==='manual'&&!description.trim()){setError('请先完成手动识图并确认描述');return;}
+  onCreate(target||{turnId:'__next__',role:targetRole},{prompt:prompt.trim()||'相册图片',ref:imageRef,usage:ai?usage:'decoration',recognition,description:description.trim()||undefined,futureOnly:!!target&&future,targetRole:target?.role||targetRole});onClose();};
+ const chooseFile=(file:File)=>void run(async()=>{if(file.size>20*1024*1024)throw Error('请选择 20MB 内的图片');const next='asset://'+await saveChatImageToIndexedDB(file);if(!mounted.current)return;setRef(next);setPreview(undefined);setDescription('');setRecognition('direct');if(mode==='decoration'&&!target)add(next);});
+ const manual=()=>void run(async()=>{if(!ref)throw Error('请先选择图片或确认生成预览');const data=await getChatImageFromIndexedDB(ref.slice(8));if(!data)throw Error('无法读取图片');const text=await describeOfflinePhoto(data);if(mounted.current){setDescription(text);setRecognition('manual');}});
+ const suggest=()=>void run(async()=>{const text=await suggestOfflineImagePrompt(session,turns,from,to);if(!text)throw Error('所选楼层没有可用画面');if(mounted.current)setPrompt(text);});
+ const generate=()=>void run(async()=>{const result=await generateImageFromConfiguredApi({userInitiated:true,description:prompt,appId:'offline-chat',characterId,useReferenceImage:!omitCharacterReference,omitCharacterReference,includeUserReference});if(!result)throw Error('请先配置并启用生图 API');const next='asset://'+await saveChatImageToIndexedDB(result.blob);if(mounted.current)setPreview(next);});
+ if(!host)return null;
+ return createPortal(<div className="offline-image-sheet-overlay" data-theme={dark?'dark':'light'} onClick={()=>{if(!busy)onClose();}}><section ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label="添加线下图片" className="offline-image-sheet" onClick={e=>e.stopPropagation()} onKeyDown={e=>{if(e.key==='Escape'&&!busy)onClose();if(e.key==='Tab'){const items=e.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled),input:not([hidden]),textarea,select');const first=items[0],last=items[items.length-1];if(e.shiftKey&&(document.activeElement===first||document.activeElement===e.currentTarget)){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}}}>
+ <header><h3>{mode==='choose'?'添加图片':mode==='ai'?'传递给 AI':target?'为此条内容配图':'氛围配图'}</h3></header>
+ {mode==='choose'?<><div className="offline-image-purpose"><button type="button" onClick={()=>setMode('decoration')}><strong>氛围配图</strong><small>仅自己看，不传递给 AI</small></button><button type="button" onClick={()=>setMode('ai')}><strong>传递给 AI</strong><small>作为剧情参考或角色互动</small></button></div><button className="offline-image-cancel" type="button" onClick={onClose}>取消</button></>:<>
+ <button className="offline-image-pick" type="button" disabled={busy} onClick={()=>input.current?.click()}>{url?<img src={url} alt={preview?'生成预览，尚未使用':'已选择图片'}/>:<><Plus size={24}/><small>点击选择相册图片</small></>}</button><input ref={input} type="file" accept="image/*" hidden onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)chooseFile(file);}}/>
+ <button type="button" className="offline-image-source-action" onClick={()=>setSource(s=>s==='album'?'generate':'album')}>{source==='album'?'使用提示词生图':'收起生图编辑'}</button>
+ {target&&<label className="offline-image-future"><input type="checkbox" checked={future} onChange={e=>setFuture(e.target.checked)}/>从下一次回复起参考此图</label>}
+ {(mode==='ai'||future)&&<div className="offline-image-form"><div className="offline-image-row"><span>识图方式</span><span>{recognition==='manual'?'描述转交':'随对话识图'}</span><button type="button" disabled={busy||!ref} onClick={manual}>手动识图</button></div><label className="offline-image-row"><span>图片用途</span><select value={usage} onChange={e=>setUsage(e.target.value as typeof usage)}><option value="scene">剧情参考</option><option value="interactive">角色互动</option></select></label></div>}
+ {!target&&<label className="offline-image-row"><span>附加到</span><select value={targetRole} onChange={e=>setTargetRole(e.target.value as typeof targetRole)}><option value="user">下一条我方内容</option><option value="assistant">下一轮对方内容</option></select></label>}
+ {recognition==='manual'&&(mode==='ai'||future)&&<label className="offline-image-description">识图描述<textarea aria-label="可编辑识图描述" value={description} maxLength={16000} onChange={e=>setDescription(e.target.value)}/></label>}
+ {source==='generate'&&<div className="offline-image-generation"><label className="ti-user-reference"><input type="checkbox" checked={includeUserReference} disabled={busy} onChange={e=>setIncludeUserReference(e.target.checked)}/><span>参考当前用户的提示词和参考图</span></label><label className="ti-user-reference"><input type="checkbox" checked={omitCharacterReference} disabled={busy} onChange={e=>setOmitCharacterReference(e.target.checked)}/><span>纯路人／场景（不使用角色外貌参考）</span></label><label>生图提示词<textarea aria-label="生图提示词" placeholder="填写提示词，或根据楼层生成建议" value={prompt} maxLength={16000} onChange={e=>setPrompt(e.target.value)}/></label>{floors>0&&<><button type="button" className="offline-image-floor-toggle" aria-expanded={floorsOpen} onClick={()=>setFloorsOpen(v=>!v)}>根据楼层生成建议 {floorsOpen?'−':'+'}</button>{floorsOpen&&<div className="offline-image-floor-range"><label>从<input aria-label="起始楼层" type="number" min={1} max={floors} value={from} onChange={e=>setFrom(Number(e.target.value))}/></label><label>到<input aria-label="结束楼层" type="number" min={from} max={floors} value={to} onChange={e=>setTo(Number(e.target.value))}/></label><button type="button" disabled={busy||from<1||to<from||to>floors} onClick={suggest}>生成建议</button></div>}</>}<button type="button" className="offline-image-generate" disabled={busy||!prompt.trim()} onClick={generate}>{busy?'处理中…':preview?'重新生成':'生成图片'}</button></div>}
+ {preview&&<div className="offline-image-preview-actions"><span>预览尚未确认</span><button type="button" disabled={busy} onClick={()=>{setRef(preview);setPreview(undefined);setDescription('');setRecognition('direct');}}>使用这张图</button></div>}
+ {error&&<p role="alert">{error}</p>}
+ <footer><button type="button" disabled={busy} onClick={onClose}>取消</button><button type="button" disabled={busy||!!preview||(!ref&&!prompt.trim())} onClick={()=>add()}>{!ref&&prompt.trim()?'加入文字图':target?'插入图片':'加入待发送'}</button></footer>
+ </>}
+ </section></div>,host);
+}

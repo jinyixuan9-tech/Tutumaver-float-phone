@@ -1,0 +1,76 @@
+/* Settings share one grouped surface; scoped to the Settings application. */
+.settings-unified {
+ --settings-background:#f2f2f7; --settings-card:#fff; --settings-field:#f2f2f7;
+ --settings-ink:#202124; --settings-muted:#74747b; --settings-border:rgba(60,60,67,.12);
+ --c-card:var(--settings-card); --c-surface:var(--settings-field);
+ --c-text:var(--settings-ink); --c-text-title:var(--settings-ink);
+ --c-border:var(--settings-border); --c-page-body-bg:var(--settings-background); --c-header-bg:var(--settings-background); --c-panel:var(--settings-card); --c-input:var(--settings-field); --surface-card:var(--settings-card); --surface-inset:var(--settings-field); background:var(--settings-background);color:var(--settings-ink);
+}
+.settings-unified .page-body{background:var(--settings-background)}
+.settings-unified :is(.page-header,.page-header-safe-area,.page-header-content){background:var(--settings-background);box-shadow:none;backdrop-filter:none}
+.settings-unified :is(.card-card,.card-featured,.card-hero,.g-card,.app-card,.ui-config-card,.ui-entry-card,.ui-collapsible,.settings-account-card,.binding-choice-card,.binding-aux-select,.binding-detail-card,.settings-option-group,.ui-group-card,.menu-group){background:var(--settings-card)!important;color:var(--settings-ink);border:0;border-radius:16px;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+.settings-unified :is(.settings-menu-section-title,.menu-desc,.binding-choice-desc,.binding-priority-note,.ai-media-note){color:var(--settings-muted)}
+.settings-unified .settings-menu-section-title{margin:0 0 10px 4px;font-size:calc(12px * var(--app-text-scale,1));letter-spacing:.02em}
+.settings-unified :is(.ui-input,.ui-select,select,textarea){background:var(--settings-field);color:var(--settings-ink);border:1px solid var(--settings-border);border-radius:11px;box-shadow:none}
+.settings-unified .settings-option-group{overflow:hidden}
+.settings-unified .ai-media-row{padding:15px 16px;min-height:52px;border-bottom:1px solid var(--settings-border);background:transparent;color:var(--settings-ink);font-size:calc(14px * var(--app-text-scale,1))}
+.settings-unified .ai-media-row:last-child{border-bottom:0}
+.settings-unified .ai-media-row select{max-width:53%;padding:7px 9px}
+.settings-unified .ai-media-note{font-size:calc(12px * var(--app-text-scale,1));line-height:1.65;margin:9px 4px 0;opacity:1}
+.settings-unified .settings-row-description{display:block;font-size:calc(11px * var(--app-text-scale,1));color:var(--settings-muted);margin-top:5px;line-height:1.5}
+.settings-unified :is(.binding-choice-card-large,.binding-choice-card-small){min-height:86px}
+.settings-unified .binding-global-primary-row{grid-template-columns:repeat(2,minmax(0,1fr))}
+.settings-unified :is(.modal-overlay,.binding-picker-overlay){position:absolute;inset:0;display:flex;align-items:center!important;justify-content:center;padding:20px;background:rgba(0,0,0,.30);box-sizing:border-box}
+.settings-unified :is(.modal-dialog,.binding-picker-dialog){background:var(--settings-card)!important;color:var(--settings-ink);border-radius:22px!important;border:0!important;box-shadow:0 16px 55px #0002!important;width:100%;max-width:440px;max-height:calc(100% - 24px);overflow-y:auto;min-height:0;bottom:auto!important;margin:0!important}
+.settings-unified :is(.binding-sheet-option,.binding-aux-option){background:var(--settings-card);color:var(--settings-ink)}
+.settings-unified .binding-sheet-option[data-selected=true]{background:var(--settings-field)}
+.settings-unified .settings-prompt-dialog{display:flex;flex-direction:column;gap:14px;padding:20px;overflow:hidden}
+.settings-unified .settings-dialog-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.settings-unified .settings-dialog-heading h3{margin:0;font-size:calc(17px * var(--app-text-scale,1));font-weight:650}
+.settings-unified .settings-dialog-heading button{padding:6px;border:0;border-radius:50%;background:var(--settings-field);color:inherit}
+.settings-unified .settings-prompt-text{width:100%;min-height:160px;height:36vh;max-height:360px;resize:vertical;overflow:auto;padding:13px;line-height:1.7;font-size:calc(14px * var(--app-text-scale,1));box-sizing:border-box}
+.settings-unified .settings-prompt-actions{display:flex;justify-content:space-between;gap:12px;flex:none}
+@media(prefers-color-scheme:dark){.settings-unified{--settings-background:#1c1c1e;--settings-card:#2c2c2e;--settings-field:#3a3a3c;--settings-ink:#f2f2f7;--settings-muted:#aaaab1;--settings-border:rgba(255,255,255,.12)}}
+
+.settings-unified :is(.menu-label,.binding-choice-label,.binding-choice-value){color:var(--settings-ink)}
+.settings-unified .binding-picker-body{min-height:0;overflow-y:auto;overscroll-behavior:contain}
+@media(prefers-color-scheme:dark){.settings-unified :is(.text-black,.text-gray-800,.text-gray-900){color:var(--settings-ink)}.settings-unified .bg-white{background:var(--settings-card)}}
+
+.settings-unified .ai-behavior-page{font-family:inherit}
+.settings-unified .ai-behavior-page :is(button,input,textarea,select){font-family:inherit}
+.settings-unified .ai-media-row{font-size:calc(14.4px * var(--app-text-scale,1));font-weight:700}
+.settings-unified .settings-row-description,.settings-unified .ai-media-note{font-size:calc(10.8px * var(--app-text-scale,1));font-weight:500}
+.voice-favorites-page { display:flex;flex-direction:column;gap:14px;font:inherit; }
+.voice-favorite-card { background:var(--settings-card,#fff);color:var(--settings-ink,var(--c-text,#222));border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0; }
+.voice-favorite-card header { display:flex;align-items:center;justify-content:space-between;gap:12px; }
+.voice-favorite-card header button { background:transparent;border:0;color:inherit;padding:6px; }
+.voice-favorite-card small { opacity:.6;font-size:calc(11px * var(--app-text-scale,1)); }
+.voice-favorite-card p { white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font-size:calc(14px * var(--app-text-scale,1)); }
+.voice-favorite-card audio { width:100%; }
+.voice-favorite-filters { display:flex;gap:6px;flex-wrap:wrap; }
+.settings-unified .voice-favorite-filters button { border:1px solid var(--settings-border);border-radius:10px;padding:7px 10px;font-family:inherit;font-size:calc(12px * var(--app-text-scale,1));font-weight:500;line-height:1.4;background:#fff;color:#111; }
+.settings-unified .voice-favorite-filters button[aria-pressed="true"] { background:#111;color:#fff;border-color:#111; }
+.voice-feature-overlay { position:absolute;inset:0;width:100%;height:100%;padding:max(64px,env(safe-area-inset-top)) 18px max(24px,env(safe-area-inset-bottom));box-sizing:border-box; }
+.voice-feature-dialog { width:100%;max-width:380px;max-height:100%;overflow:auto;align-items:stretch;color:var(--c-text,#222);font-family:var(--app-font-family,inherit);font-size:calc(14px * var(--app-text-scale,1));border-radius:20px; }
+.voice-feature-dialog label { display:flex;flex-direction:column;gap:8px; }
+.voice-feature-dialog .settings-dialog-heading { display:flex;align-items:center;justify-content:space-between;gap:12px; }
+.voice-feature-dialog .settings-dialog-heading button { background:transparent;color:inherit;border:0; }
+/* In the unified collection, removing a phone favorite must not delete its source call. */
+.voice-favorites-page [aria-label="删除通话记录"] { display:none; }
+
+/* Identity editor is centered, so clip all four corners, including its scrolling body. */
+.settings-unified .user-identity-dialog{border-radius:22px;overflow:hidden;min-height:0}
+.settings-unified .user-identity-dialog > .modal-header{flex-shrink:0}
+.settings-unified .user-identity-dialog > .modal-body{min-height:0;overflow-y:auto}
+
+/* Sheets centered by Settings are complete cards, including the scrolling edge. */
+.settings-unified .modal-sheet {
+ border-radius:22px!important;
+ width:100%;max-width:440px;max-height:calc(100% - 24px);min-height:0;
+ background:var(--settings-card);color:var(--settings-ink);
+ overflow:hidden;box-sizing:border-box;
+ box-shadow:0 16px 55px #0002;
+}
+.settings-unified .modal-sheet > .modal-header {flex:none}
+.settings-unified .modal-sheet > .modal-body {min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.settings-unified .modal-sheet {animation:modalFadeIn .18s ease-out}

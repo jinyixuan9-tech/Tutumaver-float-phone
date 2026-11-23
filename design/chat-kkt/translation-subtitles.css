@@ -1,0 +1,253 @@
+@layer ii-kkt-room-palette.ii-translation {
+  :root.chat-room-wrapper {
+    --ii-translation-font-size: 13px; /* 字幕译文字号；与原文字号独立，也乘以应用文字缩放倍率 */
+    --ii-translation-line-height: 1.5; /* 字幕行高倍数；不加px */
+    --ii-translation-width: 244px; /* 字幕最大宽度；还受消息容器限制 */
+    --ii-translation-offset-x: 12px; /* 字幕相对原文左沿的水平缩进 */
+    --ii-translation-top-gap: -3px; /* 字幕上方距离；负值上移，当前-3px，请小幅调整 */
+    --ii-translation-bottom-gap: 1px; /* 字幕下方额外间距；多行字幕仍正常撑开高度 */
+    --ii-subtitle-background: #111111; /* 字幕文字背后的底色；夜间在紧随其后的规则中单独设置 */
+    --ii-subtitle-ink: #ffffff; /* 字幕文字颜色；夜间在紧随其后的规则中单独设置 */
+  }
+
+  :root.chat-room-wrapper:where(.chat-app[data-chat-theme="dark"] *) {
+    --ii-subtitle-background: #ffffff;
+    --ii-subtitle-ink: #111111;
+  }
+
+  :root .chat-msg-wrapper [data-ui^="bubble-"]:has(> .chat-bilingual-block),
+:root .voice-msg-text-bubble:has(> .chat-bilingual-block) {
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+  }
+
+  :root .chat-bilingual-block {
+    isolation: isolate !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 0 !important;
+    position: relative !important;
+    width: fit-content !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+  }
+
+  :root .chat-msg-wrapper {
+    --ii-original-surface: #fff;
+    --ii-original-ink: #202020;
+  }
+
+  :root .chat-msg-wrapper[data-role="user"] {
+    --ii-original-surface: var(--ii-kkt-yellow,#ffe500);
+    --ii-original-ink: #202020;
+  }
+
+  :root.chat-room-wrapper:where(.chat-app[data-chat-theme="dark"] *) .chat-msg-wrapper[data-role="assistant"] {
+    --ii-original-surface: var(--ii-kkt-night-incoming,#292929);
+    --ii-original-ink: #f5f5f5;
+  }
+
+  :root .chat-bilingual-block > .chat-bilingual-section:first-child,
+:root .chat-kkt-original-row > .chat-bilingual-section {
+    position: relative !important;
+    isolation: isolate !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    width: fit-content !important;
+    margin: 0 !important;
+    padding: var(--ii-bubble-pad-y,8px) var(--ii-bubble-pad-x,12px) !important;
+    border: 0 !important;
+    border-radius: var(--ii-kkt-speech-radius,12px) !important;
+    background: var(--ii-original-surface) !important;
+    color: var(--ii-original-ink) !important;
+    -webkit-text-fill-color: var(--ii-original-ink) !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    font-size: calc(var(--ii-text-size,15px) * var(--app-text-scale,1)) !important;
+    line-height: var(--ii-text-line-height,1.6) !important;
+  }
+
+  :root .chat-bilingual-section:not(.chat-bilingual-section-translation) :is(.chat-bilingual-content,.chat-markdown,.chat-markdown *) {
+    color: var(--ii-original-ink) !important;
+    -webkit-text-fill-color: var(--ii-original-ink) !important;
+    font-size: inherit !important;
+    line-height: inherit !important;
+    text-shadow: none !important;
+    -webkit-text-stroke: 0 !important;
+  }
+
+  :root .chat-kkt-original-row {
+    position: relative !important;
+    z-index: 0 !important;
+    display: flex !important;
+    align-items: flex-end !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    width: fit-content !important;
+  }
+
+  :root .chat-msg-wrapper[data-role="assistant"] .chat-kkt-original-row > .chat-kkt-batch-meta {
+    position: absolute !important;
+    left: calc(100% + var(--ii-time-gap,4px)) !important;
+    right: auto !important;
+    bottom: 0 !important;
+  }
+
+  :root .chat-msg-wrapper[data-role="user"] .chat-kkt-original-row > .chat-kkt-batch-meta {
+    position: absolute !important;
+    right: calc(100% + var(--ii-time-gap,4px)) !important;
+    left: auto !important;
+    bottom: 0 !important;
+  }
+
+  :root .chat-bilingual-divider {
+    display: none !important;
+  }
+
+  /* 译文采用正常文档流。多行译文真实撑开，不使用 absolute、负 margin 或 translate 压住下一条。 */
+
+  :root .chat-bilingual-block > .chat-bilingual-section-translation {
+    display: block !important;
+    position: relative !important;
+    z-index: 2 !important;
+    flex: none !important;
+    align-self: flex-start !important;
+    width: fit-content !important;
+    max-width: min(var(--ii-translation-width),calc(100% - var(--ii-translation-offset-x))) !important;
+    min-width: 0 !important;
+    height: auto !important;
+    max-height: none !important;
+    margin: var(--ii-translation-top-gap) 0 var(--ii-translation-bottom-gap) var(--ii-translation-offset-x) !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    transform: none !important;
+    overflow: visible !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    font-size: calc(var(--ii-translation-font-size) * var(--app-text-scale,1)) !important;
+    font-weight: 500 !important;
+    font-style: normal !important;
+    line-height: var(--ii-translation-line-height) !important;
+    color: var(--ii-subtitle-ink) !important;
+    -webkit-text-fill-color: var(--ii-subtitle-ink) !important;
+    opacity: 1 !important;
+  }
+
+  :root .chat-bilingual-section-translation * {
+    color: var(--ii-subtitle-ink) !important;
+    -webkit-text-fill-color: var(--ii-subtitle-ink) !important;
+    font-size: inherit !important;
+    font-weight: inherit !important;
+    font-style: normal !important;
+    line-height: inherit !important;
+    text-shadow: none !important;
+    -webkit-text-stroke: 0 !important;
+  }
+
+  :root .chat-bilingual-section-translation :is(.chat-bilingual-content,.chat-markdown,.chat-markdown p,.chat-markdown-paragraph) {
+    display: inline !important;
+    margin: 0 !important;
+    overflow: visible !important;
+  }
+
+  :root .chat-bilingual-section-translation :is(.chat-markdown p,.chat-markdown-paragraph,.chat-bilingual-content:not(:has(.chat-markdown))) {
+    background: var(--ii-subtitle-background) !important;
+    padding: 1px 4px !important;
+    border-radius: 1px !important;
+    box-decoration-break: clone !important;
+    -webkit-box-decoration-break: clone !important;
+  }
+
+  :root .chat-bilingual-section-translation .chat-markdown p + p::before {
+    content: "\A ";
+    white-space: pre;
+  }
+
+  :root .chat-msg-wrapper:not([data-consecutive]) .chat-bilingual-section:first-child::before {
+    content: "" !important;
+    position: absolute !important;
+    top: -1px !important;
+    width: 20px !important;
+    height: 20px !important;
+    z-index: -1 !important;
+    background: var(--ii-original-surface) !important;
+    mask: var(--ii-kkt-tail) center/100% 100% no-repeat !important;
+    -webkit-mask: var(--ii-kkt-tail) center/100% 100% no-repeat !important;
+    pointer-events: none !important;
+  }
+
+  :root .chat-msg-wrapper[data-role="assistant"] .chat-bilingual-section:first-child::before {
+    left: var(--ii-kkt-tail-other-left) !important;
+    right: auto !important;
+    transform: scaleY(-1) !important;
+  }
+
+  :root .chat-msg-wrapper[data-role="user"] .chat-bilingual-section:first-child::before {
+    right: var(--ii-kkt-tail-self-right) !important;
+    left: auto !important;
+    transform: scale(-1,-1) !important;
+  }
+
+  /* 平面引用沿用同一个外层气泡；悬浮引用沿用原有独立回复气泡。 */
+
+  :root.chat-room-wrapper[data-ii-kkt-style="flat"] .chat-quote-message .chat-bilingual-block {
+    width: 100% !important;
+  }
+
+  :root.chat-room-wrapper[data-ii-kkt-style="flat"] .chat-quote-message .chat-bilingual-section:first-child {
+    padding: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+  }
+
+  :root.chat-room-wrapper[data-ii-kkt-style="flat"] .chat-quote-message .chat-bilingual-section:first-child::before,
+:root .voice-msg-text-bubble .chat-bilingual-section::before {
+    content: none !important;
+    display: none !important;
+  }
+
+  :root .chat-msg-wrapper [data-ui^="bubble-"]:has(> .chat-bilingual-block)::before,
+:root .chat-msg-wrapper [data-ui^="bubble-"]:has(> .chat-bilingual-block)::after {
+    content: none !important;
+    display: none !important;
+  }
+
+  :root .chat-bilingual-section-translation, :root .chat-bilingual-section-translation * {
+    font-style: normal !important;
+    opacity: 1 !important;
+  }
+
+  :root .voice-msg-text-bubble {
+    font-size: calc(var(--ii-text-size) * var(--app-text-scale,1)) !important;
+    line-height: var(--ii-text-line-height) !important;
+  }
+
+  :root .voice-msg-text-bubble:not(:has(> .chat-bilingual-block)) {
+    padding: var(--ii-bubble-pad-y) var(--ii-bubble-pad-x) !important;
+    border-radius: var(--ii-kkt-speech-radius) !important;
+    background: var(--ii-original-surface) !important;
+    color: var(--ii-original-ink) !important;
+  }
+
+  :root .voice-msg-text-bubble:not(:has(> .chat-bilingual-block)) .chat-markdown, :root .voice-msg-text-bubble:not(:has(> .chat-bilingual-block)) .chat-markdown * {
+    font-size: inherit !important;
+    line-height: inherit !important;
+    color: var(--ii-original-ink) !important;
+    -webkit-text-fill-color: var(--ii-original-ink) !important;
+  }
+}

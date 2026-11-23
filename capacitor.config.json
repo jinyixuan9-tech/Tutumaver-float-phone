@@ -1,0 +1,19 @@
+{
+  "appId": "tutumaver.float.phone",
+  "appName": "兔版float",
+  "webDir": "mobile-dist",
+  "server": {
+    "androidScheme": "https",
+    "hostname": "localhost"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#f8f7f2",
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": false
+    }
+  }
+}

@@ -1,0 +1,306 @@
+import { mediaScope, effectivePhotoDelivery } from "./media-preferences";
+import { photoStorySearchText } from "./photo-story-data";
+import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "./chat-asset-storage";
+import { generateImageFromConfiguredApi } from "./image-generation-service";
+import { getPhotoResolverDebugEnabled, getPhotoSourceStrategy, recordPhotoUse, resolvePhotoForUse } from "./photo-library-resolver";
+import { appendPhotoRecords, appendPhotoUsage, createPhotoId, loadPhotoLibrary } from "./photo-library-storage";
+import { canAutoUsePhoto, hasPhotoMatchDescription } from "./photo-library-usage";
+import type { PhotoRecord, PhotoUsageChannel } from "./photo-library-types";
+
+export type MediaIntentKind = "selfie" | "portrait" | "group" | "food" | "scenery" | "object" | "pet" | "official" | "other";
+
+export type CharacterMediaActor = {
+  type: "character";
+  characterId: string;
+  /** 可选平台专用公开素材池；传入时只允许从这些 Photos photoId 中匹配。 */
+  photoIds?: string[];
+};
+
+export type OfficialMediaActor = {
+  type: "official";
+  officialId: string;
+  photoIds: string[];
+  /** WVS 已经公开用过的官方素材；用于避免官号重复把旧图当新图。 */
+  excludedPhotoIds?: string[];
+  /** Official 生成时若模型明确从媒体池看中了某一张，可以优先命中它。 */
+  preferredPhotoId?: string;
+};
+
+export type MediaResolverRequest = {
+  actor: CharacterMediaActor | OfficialMediaActor;
+  description: string;
+  intentKind?: MediaIntentKind;
+  channel: PhotoUsageChannel;
+  targetId?: string;
+  accountId?: string;
+  appId: string;
+  /** auto uses the shared album strategy; generate skips the album; text saves a description without an API request. */
+  mode?: "auto" | "generate" | "text";
+  userInitiated?: boolean;
+  useReferenceImage?: boolean;
+  signal?: AbortSignal;
+  /** Caller records use only after caption checks succeed. */
+  deferUsage?: boolean;
+};
+
+export type MediaResolverResult = {
+  imageUrl?: string;
+  /** 允许生图但当前未配置/调用失败时，沿用 Float 文字图片兜底。 */
+  placeholderDescription?: string;
+  source: "album" | "generated" | "text_placeholder";
+  photoLibraryId?: string;
+  generatedDataUrl?: string;
+  generatedPrompt?: string;
+  generatedMediaRef?: string;
+  generatedMimeType?: string;
+  generatedUsedReference?: boolean;
+  debug?: {
+    strategy: string;
+    intentKind: MediaIntentKind;
+    reason: string;
+    albumReasons?: string[];
+  };
+};
+
+function normalizeText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[\s\p{P}\p{S}]+/gu, "")
+    .replace(/照片|图片|一张|拍一下|拍了|发一下|发给我|给我看/g, "");
+}
+
+function bigrams(value: string): Set<string> {
+  const normalized = normalizeText(value);
+  const set = new Set<string>();
+  for (let i = 0; i < normalized.length - 1; i += 1) set.add(normalized.slice(i, i + 2));
+  for (const token of value.toLowerCase().match(/[a-z0-9]{2,}/g) || []) set.add(token);
+  return set;
+}
+
+function similarity(a: string, b: string): number {
+  if (!a.trim() || !b.trim()) return 0;
+  const na = normalizeText(a);
+  const nb = normalizeText(b);
+  if (na && nb && (na.includes(nb) || nb.includes(na))) return 1;
+  const aa = bigrams(a);
+  const bb = bigrams(b);
+  if (!aa.size || !bb.size) return 0;
+  let hit = 0;
+  aa.forEach((token) => { if (bb.has(token)) hit += 1; });
+  return hit / Math.max(2, Math.min(aa.size, bb.size));
+}
+
+function photoText(photo: PhotoRecord): string {
+  if (photo.origin === "generated" && photo.generationPrompt) {
+    return [photo.displayName, photo.seriesId, photo.generationPrompt].filter(Boolean).join(" ");
+  }
+  return [
+    photo.subject,
+    photo.seriesId,
+    photoStorySearchText(photo, loadPhotoLibrary().photos),
+    photo.visionSummary,
+    photo.appearance?.hair,
+    photo.appearance?.accessories,
+    photo.appearance?.outfit,
+    photo.appearance?.season,
+    photo.appearance?.scene,
+    ...(photo.visionTags || []),
+  ].filter(Boolean).join(" ");
+}
+
+async function resolveCharacterPoolPhoto(request: MediaResolverRequest & { actor: CharacterMediaActor }): Promise<{ photo: PhotoRecord; dataUrl: string; score: number } | null> {
+  const ids = request.actor.photoIds;
+  if (!ids) return null;
+  const allowed = new Set(ids);
+  if (request.accountId) loadPhotoLibrary().photos.filter((photo) => photo.sourceAccountId === request.accountId).forEach((photo) => allowed.add(photo.id));
+  if (!allowed.size) return null;
+  const candidates = loadPhotoLibrary().photos
+    .filter((photo) => allowed.has(photo.id))
+    .filter((photo) => photo.aiUsable && hasPhotoMatchDescription(photo))
+    .filter((photo) => canAutoUsePhoto(photo, request.actor.characterId, request.channel, request.accountId))
+    .map((photo) => ({ photo, score: similarity(request.description, photoText(photo)) }))
+    .sort((a, b) => b.score - a.score);
+  const best = candidates[0];
+  if (!best || best.score < 0.13) return null;
+  const dataUrl = await getChatImageFromIndexedDB(best.photo.assetId).catch(() => null);
+  if (!dataUrl) return null;
+  return { photo: best.photo, dataUrl, score: best.score };
+}
+
+async function resolveOfficialPoolPhoto(request: MediaResolverRequest & { actor: OfficialMediaActor }): Promise<{ photo: PhotoRecord; dataUrl: string; score: number } | null> {
+  const allowed = new Set(request.actor.photoIds);
+  loadPhotoLibrary().photos.filter((photo) => photo.sourceAccountId === request.actor.officialId).forEach((photo) => allowed.add(photo.id));
+  const excluded = new Set(request.actor.excludedPhotoIds || []);
+  const all = loadPhotoLibrary().photos;
+  const preferred = request.actor.preferredPhotoId
+    ? all.find((photo) => photo.id === request.actor.preferredPhotoId && allowed.has(photo.id) && !excluded.has(photo.id) && photo.aiUsable && hasPhotoMatchDescription(photo) && canAutoUsePhoto(photo, request.actor.officialId, "wvs_official"))
+    : undefined;
+  if (preferred) {
+    const dataUrl = await getChatImageFromIndexedDB(preferred.assetId).catch(() => null);
+    if (dataUrl) return { photo: preferred, dataUrl, score: 1 };
+  }
+  const candidates = all
+    .filter((photo) => allowed.has(photo.id))
+    .filter((photo) => !excluded.has(photo.id) && canAutoUsePhoto(photo, request.actor.officialId, "wvs_official"))
+    .filter((photo) => photo.aiUsable && hasPhotoMatchDescription(photo))
+    .map((photo) => ({ photo, score: similarity(request.description, photoText(photo)) }))
+    .sort((a, b) => b.score - a.score);
+  const best = candidates[0];
+  if (!best || best.score < 0.13) return null;
+  const dataUrl = await getChatImageFromIndexedDB(best.photo.assetId).catch(() => null);
+  if (!dataUrl) return null;
+  return { photo: best.photo, dataUrl, score: best.score };
+}
+
+async function generateMedia(request: MediaResolverRequest, intentKind: MediaIntentKind): Promise<MediaResolverResult | null> {
+  const characterId = request.actor.type === "character" ? request.actor.characterId : undefined;
+  const generated = await generateImageFromConfiguredApi({
+    description: request.description,
+    userInitiated: request.userInitiated===true,
+    characterId,
+    appId: request.appId,
+    useReferenceImage: request.useReferenceImage ?? (request.actor.type === "character" && ["selfie", "portrait", "group"].includes(intentKind)),
+    // An image without an identified character must not inherit that character's text face traits either.
+    omitCharacterReference: request.actor.type !== "character" || (request.useReferenceImage !== true && !["selfie", "portrait", "group"].includes(intentKind)),
+    signal: request.signal,
+  }).catch(() => null);
+  if (!generated) {
+    return {
+      source: "text_placeholder",
+      placeholderDescription: request.description,
+      debug: getPhotoResolverDebugEnabled() ? {
+        strategy: getPhotoSourceStrategy(request.appId === "weverse" ? "wvs" : "other"),
+        intentKind,
+        reason: "当前策略允许生图，但未获得真实生成图片；回退为 Float 文字图片。",
+      } : undefined,
+    };
+  }
+  const assetId = await saveChatImageToIndexedDB(generated.blob).catch(() => "");
+  if (!assetId) return null;
+  const photoLibraryId = createPhotoId();
+  const now = Date.now();
+  appendPhotoRecords([{
+    id: photoLibraryId, assetId, originalName: `${request.appId}-${now}.png`,
+    linkedCharacterIds: characterId && request.channel !== "twitter_alt" ? [characterId] : [],
+    sharedPairIds: [], aiUsable: true, visionStatus: "unprocessed",
+    usageHistory: request.deferUsage ? [] : [{
+      channel: request.channel, characterId: request.actor.type === "official" ? request.actor.officialId : request.actor.characterId,
+      accountId: request.accountId, targetId: request.targetId, usedAt: now,
+    }],
+    origin: "generated", generatedByCharacterId: characterId, generationPrompt: generated.prompt, sourceAppId: request.appId,
+    sourceAccountId: request.actor.type === "official" ? request.actor.officialId : request.channel === "twitter_alt" ? request.accountId : undefined,
+    createdAt: now, updatedAt: now,
+  }]);
+  return {
+    imageUrl: `asset://${assetId}`,
+    source: "generated",
+    photoLibraryId,
+    generatedDataUrl: generated.dataUrl,
+    generatedPrompt: generated.prompt,
+    generatedMediaRef: generated.mediaRef,
+    generatedMimeType: generated.mimeType,
+    generatedUsedReference: generated.usedReferenceImage,
+    debug: getPhotoResolverDebugEnabled() ? {
+      strategy: getPhotoSourceStrategy(request.appId === "weverse" ? "wvs" : "other"),
+      intentKind,
+      reason: "用户手动触发生图。",
+    } : undefined,
+  };
+}
+
+/**
+ * 统一媒体解析入口 v1。
+ * App 只告诉它“谁要发、想发什么、在哪发”，不自己决定相册还是生图。
+ */
+export async function resolveMediaForUse(request: MediaResolverRequest): Promise<MediaResolverResult | null> {
+  const description = request.description.trim();
+  if (!description) return null;
+  // Automatically generate ONLY when the specific app chooses it. Text placeholders
+  // remain valid even with the image-generation provider disabled.
+  const socialAuto = (!request.mode || request.mode === "auto") && effectivePhotoDelivery(request.appId) === "auto";
+  const generateOrPlain = async () => { const result = await generateMedia(request, request.intentKind || "other").catch(() => null); return result?.imageUrl ? result : null; };
+  if (request.mode === "text") return { source: "text_placeholder", placeholderDescription: description };
+  const preferences = loadPhotoLibrary().preferences;
+  const imported = request.actor.type === "official"
+    ? preferences.enabledOfficialIds.includes(request.actor.officialId)
+    : request.channel === "twitter_alt" && request.accountId && request.actor.photoIds
+      ? preferences.enabledAlternateIds.includes(request.accountId)
+      : preferences.enabledCharacterIds.includes(request.actor.characterId);
+  const strategy = imported ? mediaScope(request.appId,request.actor.type === "character"?request.actor.characterId:request.actor.officialId).source || preferences.importedStrategy : "generated_only";
+  const intentKind = request.intentKind || "other";
+  const debugEnabled = getPhotoResolverDebugEnabled();
+
+  if (request.mode === "generate" && request.userInitiated) {
+    return generateMedia(request, intentKind);
+  }
+  const generatedOnly = !imported && request.actor.type === "character" && !request.actor.photoIds;
+  if (strategy !== "generated_only" && imported) {
+    if (request.actor.type === "character") {
+      if (request.actor.photoIds) {
+        const poolMatch = await resolveCharacterPoolPhoto(request as MediaResolverRequest & { actor: CharacterMediaActor }).catch(() => null);
+        if (poolMatch) {
+          if (!request.deferUsage) recordPhotoUse({ ...poolMatch, reasons: [] }, { characterId: request.actor.characterId, description, channel: request.channel, targetId: request.targetId, accountId: request.accountId });
+          return {
+            imageUrl: `asset://${poolMatch.photo.assetId}`,
+            source: "album",
+            photoLibraryId: poolMatch.photo.id,
+            debug: debugEnabled ? { strategy, intentKind, reason: `命中账号专用素材池（匹配 ${poolMatch.score.toFixed(2)}）。` } : undefined,
+          };
+        }
+      } else {
+        const match = await resolvePhotoForUse({
+          characterId: request.actor.characterId,
+          description,
+          channel: request.channel,
+          targetId: request.targetId,
+          accountId: request.accountId,
+          generatedOnly,
+        }).catch(() => null);
+        if (match) {
+          if (!request.deferUsage) recordPhotoUse(match, {
+            characterId: request.actor.characterId,
+            description,
+            channel: request.channel,
+            targetId: request.targetId,
+            accountId: request.accountId,
+          });
+          return {
+            imageUrl: `asset://${match.photo.assetId}`,
+            source: "album",
+            photoLibraryId: match.photo.id,
+            debug: debugEnabled ? {
+              strategy,
+              intentKind,
+              reason: "命中角色素材池。",
+              albumReasons: match.reasons,
+            } : undefined,
+          };
+        }
+      }
+    } else {
+      const match = await resolveOfficialPoolPhoto(request as MediaResolverRequest & { actor: OfficialMediaActor }).catch(() => null);
+      if (match) {
+        // 官号照片仍是 Photos 中同一个记录，发布历史回写到原照片。
+        if (!request.deferUsage) appendPhotoUsage(match.photo.id, { channel: "wvs_official", characterId: request.actor.officialId, targetId: request.targetId, usedAt: Date.now() });
+        return {
+          imageUrl: `asset://${match.photo.assetId}`,
+          source: "album",
+          photoLibraryId: match.photo.id,
+          debug: debugEnabled ? {
+            strategy,
+            intentKind,
+            reason: `命中 WVS 官号媒体池（匹配 ${match.score.toFixed(2)}）。`,
+          } : undefined,
+        };
+      }
+    }
+  }
+
+  if (strategy === "album_only") return null;
+  return { source: "text_placeholder", placeholderDescription: description };
+}
+
+/** Finish a deferred social publish. Keeps historical records; does not release/reset a photo. */
+export function recordPreparedPhotoUse(photoId: string | undefined, channel: PhotoUsageChannel, characterId: string, targetId?: string, accountId?: string): void {
+  if (photoId) appendPhotoUsage(photoId, { channel, characterId, targetId, accountId, usedAt: Date.now() });
+}

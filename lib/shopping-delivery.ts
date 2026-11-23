@@ -1,0 +1,117 @@
+import { createOrGetSession, loadChatMessages, loadChatSessions, pushChatMessage, updateMessageMediaData } from "./chat-storage";
+import { loadShoppingState, saveShoppingState } from "./shopping-storage";
+import type { ShoppingAddress, ShoppingOrder, ShoppingShipment, ShoppingState } from "./shopping-types";
+
+export function shoppingAddressLabel(address: ShoppingAddress): string {
+  return `${address.country} ${address.city} ${address.street} · ${address.name} ${address.phone}`.trim();
+}
+
+// A stable estimate, not a claim of actual carrier timing or customs fees.
+export function shoppingDeliveryEstimate(from: ShoppingAddress | undefined, to: ShoppingAddress, method: "express" | "standard" | "air" | "sea" = "express"): { days: number; fee: number } {
+  if (!from) return { days: 3, fee: 0 };
+  if (from.country !== to.country) return method === "sea" ? { days: 5, fee: 38 } : { days: 3, fee: 80 };
+  if (from.city !== to.city) return method === "standard" ? { days: 2, fee: 8 } : { days: 1, fee: 15 };
+  return method === "standard" ? { days: 1, fee: 5 } : { days: .5, fee: 10 };
+}
+
+export function shippingTimelineForOrder(order: ShoppingOrder, days: number): ShoppingOrder["shippingTimeline"] {
+  const start = new Date();
+  const at = (fraction: number) => new Date(start.getTime() + days * fraction * 86400000);
+  return ([
+    ["ordered", "已下单", 0], ["shipped", "已发货", .2],
+    ["delivering", "配送中", .65], ["delivered", "已签收", 1],
+  ] as const).map(([status, label, fraction]) => ({ status, label, timestamp: at(fraction).toISOString(), timeLabel: at(fraction).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) }));
+}
+
+export function announceShoppingGift(characterId: string, item: { id: string; title: string; merchantLabel: string; priceLabel: string; previewIcon: string; tone: "ivory" | "mist" | "blush" | "graphite" }, id: string, recipientName: string, deliveredAt?: string, sentAt?: string): void {
+  const session = createOrGetSession(characterId);
+  pushChatMessage({ sessionId: session.id, role: "user", content: "", mediaType: "gift", mediaData: {
+    shoppingGiftId: id, giftName: item.title, label: item.title, giftMerchantLabel: item.merchantLabel,
+    giftPriceLabel: item.priceLabel, giftPreviewIcon: item.previewIcon, giftTone: item.tone,
+    giftSentAt: sentAt || new Date().toISOString(), giftDeliveredAt: deliveredAt,
+    recipientId: characterId, recipientName,
+  } });
+  window.dispatchEvent(new CustomEvent("chat-messages-updated", { detail: { sessionId: session.id } }));
+}
+
+export function announceShoppingFood(order: ShoppingOrder, deliveredAt?: string): void {
+  if (!order.recipientCharacterId) return;
+  const session = createOrGetSession(order.recipientCharacterId);
+  const eta = order.shippingTimeline?.find(event => event.status === "delivered")?.timestamp;
+  pushChatMessage({ sessionId: session.id, role: "user", content: "", mediaType: "gift", mediaData: {
+    label: "外卖卡", giftName: order.summary, shoppingOrderId: order.id,
+    takeoutShop: order.merchantLabel, takeoutItems: order.summary,
+    takeoutDestination: order.recipientAddressLabel?.split(" · ")[0], takeoutDeliverAt: eta,
+    giftMerchantLabel: order.merchantLabel, giftPriceLabel: order.totalLabel,
+    giftPreviewIcon: order.items[0]?.previewIcon || "🥡",
+    giftSentAt: order.paidAt || new Date().toISOString(), giftDeliveredAt: deliveredAt,
+    recipientId: order.recipientCharacterId, recipientName: order.recipientName,
+  } });
+  window.dispatchEvent(new CustomEvent("chat-messages-updated", { detail: { sessionId: session.id } }));
+}
+
+function markChatDelivery(sessionId: string, matches: (data: NonNullable<ReturnType<typeof loadChatMessages>[number]["mediaData"]>) => boolean, deliveredAt: string): void {
+  for (const message of loadChatMessages(sessionId)) {
+    if (message.mediaType === "gift" && message.mediaData && matches(message.mediaData)) {
+      updateMessageMediaData(message.id, { ...message.mediaData, giftDeliveredAt: deliveredAt });
+    }
+  }
+}
+
+export function syncShoppingDeliveries(): void {
+  if (typeof window === "undefined") return;
+  syncCharacterTakeoutDeliveries();
+  const state = loadShoppingState();
+  const now = Date.now();
+  let changed = false;
+  const shipments: ShoppingShipment[] = state.shipments.map(s => {
+    if (s.noticeSentAt || new Date(s.deliverAt).getTime() > now) return s;
+    const session = createOrGetSession(s.recipientCharacterId);
+    if (s.notifyRecipient) markChatDelivery(session.id, data => data.shoppingGiftId === s.id, s.deliverAt);
+    pushChatMessage({ sessionId: session.id, role: "system", content: `${s.item.title} 已送达${s.notifyRecipient ? " · 对方此前知道礼物在路上" : " · 对方现在才得知这份惊喜"}`, mediaData: { label: "__shopping_delivery__", shoppingGiftId: s.id } });
+    if (!s.notifyRecipient) announceShoppingGift(s.recipientCharacterId, s.item, s.id, s.recipientName, s.deliverAt, s.sentAt);
+    window.dispatchEvent(new CustomEvent("chat-messages-updated", { detail: { sessionId: session.id } }));
+    changed = true;
+    return { ...s, noticeSentAt: new Date().toISOString() };
+  });
+  const orders = state.orders.map(o => {
+    if (o.canceledAt) return o;
+    if (!o.recipientCharacterId || o.deliveryNoticeSentAt) return o;
+    const delivered = o.shippingTimeline?.find(e => e.status === "delivered");
+    if (!delivered || new Date(delivered.timestamp).getTime() > now) return o;
+    const session = createOrGetSession(o.recipientCharacterId);
+    if (o.notifyRecipient) markChatDelivery(session.id, data => data.shoppingOrderId === o.id || String(data.shoppingGiftId || "").startsWith(`${o.id}::`), delivered.timestamp);
+    pushChatMessage({ sessionId: session.id, role: "system", content: `${o.mode === "food" ? "外卖" : "礼物"}已送达 · ${o.summary}${o.notifyRecipient ? " · 对方此前知道配送中" : " · 对方现在才得知这份惊喜"}`, mediaData: { label: "__shopping_delivery__", shoppingOrderId: o.id } });
+    if (!o.notifyRecipient) {
+      if (o.mode === "food") announceShoppingFood(o, delivered.timestamp);
+      else for (const item of o.items) {
+        announceShoppingGift(o.recipientCharacterId, item, `${o.id}::${item.id}::delivered`, o.recipientName || "收件人", delivered.timestamp, o.paidAt);
+      }
+    }
+    window.dispatchEvent(new CustomEvent("chat-messages-updated", { detail: { sessionId: session.id } }));
+    changed = true;
+    return { ...o, deliveryNoticeSentAt: new Date().toISOString() };
+  });
+  if (changed) saveShoppingState({ ...state, shipments, orders });
+}
+
+/** Chat-only orders have no Shopping order; the card and the centered notice are the receipt. */
+export function syncCharacterTakeoutDeliveries(): void {
+  if (typeof window === "undefined") return;
+  const now = Date.now();
+  for (const session of loadChatSessions()) {
+    if (session.isGroup) continue;
+    for (const message of loadChatMessages(session.id)) {
+      const data = message.mediaData;
+      if (message.role !== "assistant" || message.mediaType !== "gift" || !data?.takeoutOrderId
+        || !data.takeoutDeliverAt || data.giftDeliveredAt) continue;
+      const eta = Date.parse(data.takeoutDeliverAt);
+      if (!Number.isFinite(eta) || eta > now) continue;
+      updateMessageMediaData(message.id, { ...data, giftDeliveredAt: new Date(now).toISOString() });
+      pushChatMessage({ sessionId: session.id, role: "system",
+        content: `外卖已送达 · ${data.takeoutShop || "店铺"} · ${data.takeoutItems || data.giftName || "餐品"}`,
+        mediaData: { label: "__shopping_delivery__", takeoutOrderId: data.takeoutOrderId } });
+      window.dispatchEvent(new CustomEvent("chat-messages-updated", { detail: { sessionId: session.id } }));
+    }
+  }
+}

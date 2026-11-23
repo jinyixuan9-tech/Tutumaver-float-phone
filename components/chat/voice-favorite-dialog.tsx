@@ -1,0 +1,11 @@
+"use client";
+import { useState } from "react";
+import { X } from "lucide-react";
+import { saveVoiceFavorite, getVoiceFavorite, type VoiceFavoriteKind } from "@/lib/voice-favorites";
+import { resolveUserVoiceConfig,resolveVoiceConfig,synthesizeSpeech } from "@/lib/tts-service";
+export type FavoriteVoiceDraft={kind:VoiceFavoriteKind;sourceKey:string;text:string;characterId:string;role:"user"|"assistant";getAudio:()=>Promise<Blob|null|undefined>};
+export function VoiceFavoriteDialog({draft,onClose,onSaved}:{draft:FavoriteVoiceDraft;onClose:()=>void;onSaved?:()=>void}){
+ const [busy,setBusy]=useState(false),[generate,setGenerate]=useState(false),[error,setError]=useState("");
+ async function save(){if(busy)return;setBusy(true);setError("");try{const existing=await getVoiceFavorite(draft.kind,draft.sourceKey);if(existing?.text===draft.text){onSaved?.();onClose();return;}let blob=await draft.getAudio();if(!blob){if(!generate){setGenerate(true);return;}const config=draft.role==="user"?resolveUserVoiceConfig():resolveVoiceConfig(draft.characterId,"chat");if(!config)throw Error("请先绑定对应的语音配置");blob=await synthesizeSpeech(draft.text,config);}if(!blob)throw Error("没有生成音频");await saveVoiceFavorite({kind:draft.kind,sourceKey:draft.sourceKey,text:draft.text,characterId:draft.characterId,role:draft.role,audio:blob});onSaved?.();onClose();}catch(e){setError(e instanceof Error?e.message:"收藏失败");}finally{setBusy(false);}}
+ return <div className="modal-overlay settings-prompt-overlay voice-feature-overlay" onClick={()=>{if(!busy)onClose();}}><section className="modal-dialog settings-prompt-dialog voice-feature-dialog" role="dialog" aria-modal="true" aria-label="收藏语音" onKeyDown={e=>{if(e.key==="Escape"&&!busy)onClose();}} onClick={e=>e.stopPropagation()}><header className="settings-dialog-heading"><h3>收藏语音</h3><button aria-label="关闭" disabled={busy} onClick={onClose}><X size={20}/></button></header><p style={{whiteSpace:"pre-wrap",maxHeight:"25vh",overflow:"auto"}}>{draft.text}</p><p className="menu-desc">{generate?"没有已有音频。继续将调用一次语音 API，生成后保存到本地收藏。":"保存已有音频到本地独立收藏，以后回听无需再次合成。"}</p>{error&&<p role="alert">{error}</p>}<button className="ui-btn ui-btn-primary" disabled={busy} onClick={()=>void save()}>{busy?"正在收藏…":generate?"生成并收藏（调用语音 API）":"收藏语音"}</button></section></div>;
+}

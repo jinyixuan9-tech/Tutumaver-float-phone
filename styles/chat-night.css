@@ -1,0 +1,96 @@
+/* Chat-only appearance overlay; no changes to saved CSS or other apps. */
+.chat-app .page-title,.chat-app .page-title *,.chat-app .chat-bilingual-section-translation,.chat-app .chat-bilingual-section-translation *,.chat-app .chat-bilingual-toggle{ text-shadow:none!important;-webkit-text-stroke:0!important;filter:none!important; }
+.chat-app[data-chat-theme="dark"] {
+ color-scheme:dark;
+ --c-header-bg:#1e2024!important;--c-page-body-bg:#191b1e!important;--c-card:#24272b!important;--c-card-border:#303338!important;
+ --c-panel:#24272b!important;--c-panel-border:#34383e!important;--c-text-title:#dbdde1!important;--c-text:#b4b8bf!important;
+ --c-icon:#93979f!important;--c-icon-active:#e2e4e8!important;--c-input:#292d32!important;--c-input-border:#353a42!important;
+ --c-bubble-self:#34454a!important;--c-bubble-other:#292d32!important;--c-polaroid:#25282c!important;--c-polaroid-back:#292d32!important;
+ --c-border:#303338!important;--c-surface:#24272b!important;--c-action-blue:#96bde0!important;
+ background:#191b1e!important;color:#dbdde1!important;
+}
+.chat-app[data-chat-theme="dark"] :is(.page-shell,.page-body,.chat-main-content,.kkt-list-page,.chat-room-wrapper,.user-profile-page-root,.moments-feed-list){background-color:#191b1e!important;color:#dbdde1!important;}
+.chat-app[data-chat-theme="dark"] :is(.page-header,.chat-tab-bar,.chat-input-bar,.chat-composer,.chat-input-container){background:#1e2024!important;border-color:#303338!important;box-shadow:none!important;}
+.chat-app[data-chat-theme="dark"] :is(.kkt-list-title,.kkt-header-actions>button,.kkt-own-text strong,.kkt-contact-name,.kkt-session-name,.page-title,.chat-input-textarea){color:#dbdde1!important;}
+.chat-app[data-chat-theme="dark"] :is(.kkt-own-text span,.kkt-section-heading,.kkt-contact-status,.kkt-session-preview,.kkt-session-time,.chat-bilingual-section-translation){color:#a3a8b0!important;}
+.chat-app[data-chat-theme="dark"] :is(.kkt-search-bar,.chat-search-bar,.menu-card,.menu-section,.modal-dialog,.modal-content,.moments-comment-list,.moments-comments,.chat-bubble-role-assistant){background:#24272b!important;color:#dbdde1!important;border-color:#303338!important;}
+.chat-app[data-chat-theme="dark"] .chat-bubble-role-user{background:#34454a!important;color:#dbdde1!important;}
+.chat-app[data-chat-theme="dark"] :is(.chat-bubble-role-user,.chat-bubble-role-assistant) :is(.chat-bilingual-content,.chat-bilingual-content *){color:#dbdde1!important;}
+.chat-app[data-chat-theme="dark"] :is(.chat-bubble-role-user,.chat-bubble-role-assistant) .chat-bilingual-section-translation :is(.chat-bilingual-content,.chat-bilingual-content *){color:#adb4bf!important;}
+.chat-app[data-chat-theme="dark"] :is(input,textarea,select){color:#dbdde1!important;background-color:#292d32!important;border-color:#353a42!important;}
+.chat-app[data-chat-theme="dark"] :is(.kkt-list-section,.chat-session-item,.chat-contact-item,.menu-item,.moments-post){border-color:#303338!important;}
+.chat-app[data-chat-theme="dark"] :is(.kkt-profile-link,.kkt-music-pill){color:#a8adb5!important;border-color:#555b65!important;background:transparent!important;}
+.chat-app[data-chat-theme="dark"] .chat-tab-bar .chat-tab{color:#696e77!important;}
+.chat-app[data-chat-theme="dark"] .chat-tab-bar .chat-tab-active{color:#e2e4e8!important;}
+.chat-app[data-chat-theme="dark"] .user-profile-page-root::before{display:none!important;}
+.chat-app[data-chat-theme="dark"] .user-profile-page-root :is(.bg-white,.bg-white\/70){background:#24272b!important;}
+.chat-app[data-chat-theme="dark"] .moments-feed-page .moments-profile-hero{background-color:#191b1e!important;}
+.chat-appearance-scrim{position:absolute;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:#0006;padding:24px;}
+.chat-app[data-chat-theme="dark"] :is(.kkt-update-preview,.kkt-recommend-row,.kkt-group-text strong,.kkt-group-decor){color:#dbdde1!important;border-color:#484d56!important;}
+.chat-app[data-chat-theme="dark"] .kkt-group-text small{color:#a3a8b0!important;}
+.chat-app[data-chat-theme="dark"] .kkt-chats-page .chat-list-tab{color:#a3a8b0!important;border-color:#3b4048!important;}
+.chat-app[data-chat-theme="dark"] .kkt-chats-page .chat-list-tab.active{color:#191b1e!important;background:#dbdde1!important;}
+.chat-app[data-chat-theme="dark"] .chat-profile-wallet-card{background:#252c35!important;color:#dbdde1!important;border-color:#343c47!important;box-shadow:none!important;}
+.chat-app[data-chat-theme="dark"] .chat-profile-wallet-card [style*="color"]{color:#b8c9df!important;}
+
+.chat-appearance-dialog{width:100%;max-width:280px;overflow:hidden;background:var(--c-panel,#fff);color:var(--c-text-title,#30343e);border-radius:16px;box-shadow:0 12px 45px #0003;}
+.chat-appearance-dialog h2{font-size:16px;margin:0;padding:26px 20px;text-align:center;font-weight:600;}
+.chat-appearance-actions{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--c-panel-border,#eee);}
+.chat-appearance-actions button{border:0;background:none;color:var(--c-text-title,#30343e);font:inherit;font-size:14px;padding:15px 8px;cursor:pointer;}
+.chat-appearance-actions button:first-child{color:var(--c-action-blue,#246bfd);font-weight:600;border-right:1px solid var(--c-panel-border,#eee);}
+/* Wallpaper stays independent of day/night surfaces. */
+.chat-app .chat-room-wrapper[data-has-bg-image]{background-color:#fff!important;}
+.chat-app .chat-room-wrapper[data-has-bg-image]>.page-body{background:transparent!important;}
+
+/* Chat wallet surfaces, transaction sheets and role wallet setup share the Chat theme. */
+.chat-app[data-chat-theme="dark"] {
+ --wallet-page:#191b1e;--wallet-surface:#24272b;--wallet-soft:#2d3137;--wallet-border:#3b4048;
+ --wallet-text:#e0e2e6;--wallet-secondary:#b4b8bf;--wallet-muted:#959ba5;
+ --wallet-action:#c7cbd2;--wallet-action-ink:#202328;--wallet-income:#75c8a3;--wallet-expense:#ee9693;
+}
+.chat-app[data-chat-theme="dark"] :is(.wallet-page-root,.wallet-role-setup) :is(input,select,textarea){background:var(--wallet-soft)!important;color:var(--wallet-text)!important;border-color:var(--wallet-border)!important;color-scheme:dark;}
+.chat-app[data-chat-theme="dark"] :is(.wallet-page-root,.wallet-role-setup) input::placeholder{color:var(--wallet-muted)!important;}
+.chat-app[data-chat-theme="dark"] .wallet-page-root button{color:inherit;}
+
+
+/* 1.6 reviewed public call UI compatibility: append approved call-only styles. */
+/* 046: Video-call glass input must not inherit global Chat dark input fill. */
+.chat-app[data-chat-theme="dark"] .call039-voice-compose input,
+.chat-app[data-chat-theme="light"] .call039-voice-compose input {
+  background:transparent!important;
+  background-color:transparent!important;
+  border-color:transparent!important;
+  box-shadow:none!important;
+  outline:none;
+  -webkit-appearance:none;
+  appearance:none;
+}
+.chat-app[data-chat-theme="dark"] .call039-voice-compose input {
+  color:#f7f5fa!important;
+  caret-color:#f7f5fa;
+}
+.chat-app[data-chat-theme="dark"] .call039-voice-compose input::placeholder {
+  color:#d0c9d5!important;
+  opacity:1;
+}
+.chat-app[data-chat-theme="light"] .call039-voice-compose input {
+  color:#fff!important;
+  caret-color:#fff;
+}
+.chat-app[data-chat-theme="light"] .call039-voice-compose input::placeholder {
+  color:#ece7f0!important;
+  opacity:1;
+}
+/* Match temporary video upload button to Chat light/dark appearance. */
+.chat-app[data-chat-theme="light"] .call039-temp-upload {
+  background:rgba(251,250,254,.83)!important;
+  border-color:rgba(77,65,89,.42)!important;
+  color:#34303b!important;
+  box-shadow:0 2px 9px #00000024;
+}
+.chat-app[data-chat-theme="dark"] .call039-temp-upload {
+  background:rgba(50,46,61,.75)!important;
+  border-color:rgba(255,255,255,.58)!important;
+  color:#fff!important;
+  box-shadow:0 2px 9px #00000034;
+}

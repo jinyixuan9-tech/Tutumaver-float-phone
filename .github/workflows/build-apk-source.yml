@@ -1,0 +1,108 @@
+name: Build Rabbit Float APK (Personal Release)
+
+on:
+  workflow_dispatch:
+    inputs:
+      signing_action:
+        description: "First-ever install: initialize; later builds: build"
+        type: choice
+        required: true
+        default: build
+        options:
+          - build
+          - initialize
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rabbit-personal-release
+  cancel-in-progress: false
+
+jobs:
+  release-apk:
+    name: Personal signed Release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Check out fork source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Set up Java 17 and cache Gradle dependencies
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Verify fork and initialize / unlock personal signing
+        id: signing
+        env:
+          RF_SIGNING_PASSPHRASE: ${{ secrets.RF_SIGNING_PASSPHRASE }}
+          SIGNING_ACTION: ${{ inputs.signing_action || 'build' }}
+        run: |
+          set -eu
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            echo "Signing is disabled for pull requests."
+            exit 1
+          fi
+          node scripts/rf-signing.mjs "$SIGNING_ACTION"
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Build locally bundled app
+        run: npm run android:web
+
+      - name: Check bundled entry
+        run: test -s mobile-dist/index.html
+
+      - name: Sync Android assets
+        run: npx cap sync android
+
+      - name: Check native assets
+        run: test -s android/app/src/main/assets/public/index.html
+
+      - name: Build signed Release APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Verify APK signing and assign versioned filename
+        id: name
+        env:
+          VERSION_NAME: ${{ steps.signing.outputs.version_name }}
+          VERSION_CODE: ${{ steps.signing.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          FROM="android/app/build/outputs/apk/release/app-release.apk"
+          test -s "$FROM"
+          APK_SIGNER=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name apksigner -type f | sort -V | tail -1)
+          test -n "$APK_SIGNER"
+          "$APK_SIGNER" verify --verbose "$FROM"
+          TAG="v${VERSION_NAME}-vc${VERSION_CODE}-run${GITHUB_RUN_NUMBER}-${GITHUB_SHA:0:7}"
+          NAME="Rabbit-Float-${TAG}-release"
+          mkdir -p apk-output
+          cp "$FROM" "apk-output/${NAME}.apk"
+          echo "artifact_name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "APK: ${NAME}.apk" >> "$GITHUB_STEP_SUMMARY"
+          echo "Keep your encrypted signing.backup.enc from the rf-signing branch and the password Secret backed up safely." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload signed Release APK (never upload signing keys)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.artifact_name }}
+          path: apk-output/*.apk
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,117 @@
+export type PhotoVisionStatus = "unprocessed" | "pending" | "done" | "failed";
+
+export type PhotoUsageChannel = "dm_user" | "moments" | "dm_char" | "bubble" | "sms" | "wvs" | "other" | "wvs_artist" | "wvs_official" | "twitter_main" | "twitter_alt";
+
+export type PhotoUsageRecord = {
+  channel: PhotoUsageChannel;
+  characterId: string;
+  targetId?: string;
+  accountId?: string;
+  usedAt: number;
+};
+
+export type PhotoAppearance = {
+  hair?: string;
+  accessories?: string;
+  outfit?: string;
+  season?: string;
+  scene?: string;
+};
+
+export type PhotoPersonSlot = {
+  id: string;
+  position?: string;
+  mappedCharacterId?: string;
+  appearance: PhotoAppearance;
+};
+
+export type PhotoSourceStrategy = "album_only" | "generated_only" | "album_then_generated";
+
+export type CharacterCurrentTraits = {
+  text: string;
+  sourcePhotoId?: string;
+  generatedReferencePhotoId?: string;
+  updatedAt: number;
+};
+
+export type PhotoRecord = {
+  id: string;
+  assetId: string;
+  originalName?: string;
+  /** 用户命名与导入来源独立保存，重新识图不会覆盖。 */
+  displayName?: string;
+  sourceUrl?: string;
+
+  /** 哪些角色可以把这张照片当作自己的照片库素材使用。 */
+  linkedCharacterIds: string[];
+
+  /** 真正的角色×角色共享关系。user 不参与 shared pair。 */
+  sharedPairIds: string[];
+
+  /** Photo Resolver 是否允许自动选中这张图。 */
+  aiUsable: boolean;
+
+  /** 自动识图。AI 结果只是初始建议，全部允许用户后续手改。 */
+  visionStatus: PhotoVisionStatus;
+  visionSummary?: string;
+  subject?: string;
+  appearance?: PhotoAppearance;
+  people?: PhotoPersonSlot[];
+  visionTags?: string[];
+  visionError?: string;
+
+  /** 用户人工修改过的字段名；重新识图默认不覆盖这些字段。 */
+  manualFields?: string[];
+
+  /** DM / 朋友圈等复用规则。 */
+  usageHistory: PhotoUsageRecord[];
+
+  origin?: "upload" | "generated";
+  generatedByCharacterId?: string;
+  generationPrompt?: string;
+  sourceAppId?: string;
+  sourceAccountId?: string;
+  seriesId?: string;
+  stackId?: string;
+  /** 用户填写的单张故事；识图不覆盖。 */
+  storyNote?: string;
+  /** 只存于套图封面的通用背景，与每张备注同时读取。 */
+  stackStoryNote?: string;
+  /** 手动放出后从该时间开始计算新一轮使用记录。 */
+  releasedAt?: number;
+
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type PhotoLibraryPreferences = {
+  /** v0.3.4 起统一给 Chat / Moments / WVS / 后续 Bubble、SMS 使用。 */
+  mediaStrategy: PhotoSourceStrategy;
+  /** 旧字段保留用于迁移兼容，不再作为新 App 的独立策略入口。 */
+  chatStrategy: PhotoSourceStrategy;
+  momentsStrategy: PhotoSourceStrategy;
+  resolverDebug: boolean;
+  enabledCharacterIds: string[];
+  enabledOfficialIds: string[];
+  enabledAlternateIds: string[];
+  /** 只对已经引入 Photos 的账号生效。 */
+  importedStrategy: "album_only" | "album_then_generated";
+};
+
+export type PhotoAlbum = {
+  id: string;
+  characterId: string;
+  name: string;
+  origin?: "generated";
+  photoIds: string[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type PhotoLibraryState = {
+  version: 2;
+  photos: PhotoRecord[];
+  albums: PhotoAlbum[];
+  currentTraitsByCharacter: Record<string, CharacterCurrentTraits>;
+  preferences: PhotoLibraryPreferences;
+};

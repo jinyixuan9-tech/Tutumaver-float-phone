@@ -1,0 +1,7 @@
+"use client";
+import {useState} from "react";
+import {X} from "lucide-react";
+export function ManualCallDialog({count,onClose,onSave}:{count:number;onClose:()=>void;onSave:(kind:"voice"|"video",duration:string)=>void}){
+ const [kind,setKind]=useState<"voice"|"video">("voice"),[duration,setDuration]=useState(""),[error,setError]=useState("");
+ return <div className="modal-overlay settings-prompt-overlay voice-feature-overlay" onClick={onClose}><section className="modal-dialog settings-prompt-dialog voice-feature-dialog" role="dialog" aria-modal="true" aria-label="整理为通话记录" onKeyDown={e=>{if(e.key==="Escape")onClose();}} onClick={e=>e.stopPropagation()}><header className="settings-dialog-heading"><h3>整理为通话记录</h3><button aria-label="关闭" onClick={onClose}><X size={20}/></button></header><p>将选中的 {count} 条消息收进折叠记录。保留原文和原有顺序，不改变 AI 上下文。</p><label>类型<select className="ui-input" value={kind} onChange={e=>setKind(e.target.value as "voice"|"video")}><option value="voice">语音通话</option><option value="video">视频通话</option></select></label><label>时长（可选）<input className="ui-input" value={duration} onChange={e=>setDuration(e.target.value)} placeholder="例如 05:30"/></label>{error&&<p role="alert">{error}</p>}<button className="ui-btn ui-btn-primary" onClick={()=>{if(duration.trim()&&!/^\d{1,3}:[0-5]\d$/.test(duration.trim())){setError("时长请填写 分钟:秒，例如 05:30");return;}try{onSave(kind,duration.trim());}catch(e){setError(e instanceof Error?e.message:"整理失败");}}}>确认整理</button></section></div>;
+}

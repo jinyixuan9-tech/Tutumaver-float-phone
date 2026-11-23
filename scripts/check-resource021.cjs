@@ -1,0 +1,42 @@
+// Behavioral regression for ordinary videos. Real persistence/domain functions; mocked platform/LLM boundaries.
+const fs=require('fs'),ts=require('typescript'),path=require('path'),Module=require('module'),assert=require('node:assert/strict');const kv=new Map(),revoked=[],requests=[];let response={},translationCalls=0,available=true;const orig=Module._load;
+global.window=new EventTarget();global.CustomEvent=class extends Event{constructor(name,options){super(name);this.detail=options?.detail}};
+Module._load=function(req,parent,...rest){const key=path.basename(req);if(parent?.filename.includes('/lib/')){
+ if(key==='kv-db')return {registerKvMigration(){},kvGet:k=>kv.get(k)||null,kvSet:(k,v)=>kv.set(k,v)};
+ if(key==='memory-event-meta')return {revokeMemorySources:keys=>revoked.push(...keys)};
+ if(key==='settings-storage')return {resolveBinding:()=>({}),loadBindingConfig:()=>({}),resolveUserIdentity:()=>({id:'u'})};
+ if(key==='character-storage')return {loadCharacters:()=>[{id:'a',name:'A'},{id:'b',name:'B'},{id:'outsider',name:'陌生人'}]};
+ if(key==='memory-storage')return {loadMemoryConfig:()=>({})};
+ if(key==='calendar-storage')return {loadOwnerCalendarPlans:()=>[]};
+ if(key==='worldline-storage')return {worldlineEventsForCharacter:()=>[]};
+ if(key==='short-term-assembler')return {loadNativeTimeline:()=>[]};
+ if(key==='ytb-runtime')return {settledEarning:(s,c,x)=>s.earnings.some(e=>e.id===x.id)?null:{...x,amount:x.originalAmount,currency:x.originalCurrency,rate:1},ytbAvailability:()=>({free:available})};
+ if(key==='ytb-policy')return {ytbRecognizes:(a,b)=>a?.id===b?.id||a?.disclosure!=='none'};
+ if(key==='ytb-engine')return {channelPublic:c=>c.name+' '+c.style,generateYtb:async(c,p,context)=>{requests.push({p,context});return response;}};
+ if(key==='content-translation')return {resolveContentTranslationApiConfig:()=>({id:'t'})};
+ if(key==='chat-engine')return {sendLLMRequest:async(api,p,m)=>{translationCalls++;const input=JSON.parse(m[1].content);requests.push({translation:m[0].content});return JSON.stringify({texts:input.texts.map(s=>s?'译:'+s:'')});}};
+ if(key==='reverse-phone-state')return {activeReverse:()=>null};
+ if(key==='chat-storage')return {createOrGetSession:()=>({id:'session'}),pushChatMessage:m=>requests.push({message:m})};
+ if(key==='chat-notification-events')return {CHAT_OPEN_SESSION_EVENT:'open-session'};
+ }return orig.call(this,req,parent,...rest)};
+require.extensions['.ts']=(m,f)=>m._compile(ts.transpileModule(fs.readFileSync(f,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,f);
+const st=require('../lib/ytb-storage.ts'),v=require('../lib/ytb-video-storage.ts'),engine=require('../lib/ytb-video-engine.ts'),ctx=require('../lib/ytb-video-context.ts'),share=require('../lib/ytb-video-share.ts');
+const user=st.makeYtbChannel('u','user','夜间散步'),a=st.makeYtbChannel('a','character','A'),b=st.makeYtbChannel('b','character','B');let state=st.emptyYtbState();state.channels=[user,a,b];state.deals=[{id:'order',channelId:a.id,brand:'品牌',status:'active',amount:100,currency:'CNY'}];st.saveYtbState(state);
+const draft=(ch=a.id,patch={})=>({...v.newVideoDraft(ch),title:'海边散步',content:'去了海边喝咖啡',duration:'12:48',views:100,...patch});
+(async()=>{
+ const first=draft(a.id,{participantIds:[a.id,b.id],linkedDealId:'order'});v.putVideoDraft(first);assert.equal(v.loadVideoState().drafts.length,1);assert.equal(st.loadYtbState().earnings.length,0);
+ const video=v.publishVideoDraft(first);assert.equal(st.loadYtbState().earnings.length,1);assert.equal(st.loadYtbState().deals[0].status,'completed');assert.equal(v.loadVideoState().drafts.length,0);assert.equal(v.loadVideoState().videos.filter(x=>x.participantIds.includes(b.id)).length,1);
+ assert(ctx.ytbVideoProjectionEntries('a')[0].content.includes('合作发布事件'));assert(ctx.ytbVideoProjectionEntries('b')[0].content.includes('合作发布事件'));assert.equal(st.loadYtbState().threads.length,0,'native event needs no DM reply');
+ v.publishVideoDraft({...first,id:'edit',editingId:video.id,customDate:true});assert.equal(st.loadYtbState().earnings.length,1);
+ assert.throws(()=>v.publishVideoDraft(draft(a.id,{linkedDealId:'order'})),/商单/);assert.throws(()=>v.publishVideoDraft(draft(a.id,{duration:'12:99'})),/时长/);assert.throws(()=>v.publishVideoDraft(draft(a.id,{customDate:true,publishedAt:Date.now()+100000})),/日期/);
+ assert.equal(ctx.findLocalYtbVideos('a','你发的海边视频').status,'matched');assert.equal(ctx.findLocalYtbVideos('a','your beach video').status,'matched');assert.equal(ctx.findLocalYtbVideos('outsider','海边视频').status,'none');assert.equal(ctx.findLocalYtbVideos('a','你吃了吗').status,'none');assert.equal(translationCalls,0,'lookup does not call AI');
+ const second=v.publishVideoDraft(draft(a.id));assert.equal(ctx.findLocalYtbVideos('a','海边视频').status,'ambiguous');v.deleteYtbVideo(second.id);
+ share.shareYtbVideoInApp(video.id,user.id,b.id);assert.equal(st.loadYtbState().threads[0].messages[0].videoSnapshot.content,video.content);assert.equal(translationCalls,0);share.shareYtbVideoToChat(video.id,'outsider');const card=requests.find(r=>r.message).message;assert.equal(card.mediaData.ytbVideoSnapshot.id,video.id);assert(card.mediaData.appHistoryText.includes(video.content));assert.equal(ctx.findLocalYtbVideos('outsider','海边视频').status,'matched');
+ v.deleteYtbVideo(video.id);assert.equal(v.loadVideoState().videos.length,0);assert.equal(st.loadYtbState().threads[0].messages.length,0);assert.equal(ctx.ytbVideoProjectionEntries('a').length,0);assert.equal(ctx.ytbVideoProjectionEntries('b').length,0);assert(revoked.includes('ytb:video:'+video.id));assert.equal(st.loadYtbState().earnings.length,1);
+ let d=draft(a.id,{title:'中文标题',content:'中文内容'});let t=await engine.translateVideoDraft(d);assert.equal(translationCalls,0);assert.equal(t.title,'中文标题');t=await engine.translateVideoDraft({...d,translationLanguage:'ko'});assert.equal(t.titleZh,'中文标题');assert(t.title.startsWith('译:'));
+ d=draft(a.id,{title:'海辺の日',titleZh:'海边一天',content:'中文内容',baseline:{original:['海辺の日','','中文内容'],chinese:['海边一天','','']}});t=await engine.translateVideoDraft({...d,titleZh:'海边的第二天',translationLanguage:'ko'});assert.equal(t.titleZh,'海边的第二天');assert(requests.slice(-2).some(r=>r.translation?.includes('reference 原文所使用的语言')));const before=translationCalls;t=await engine.translateVideoDraft({...d,title:'海辺の朝',titleZh:'海边早晨'});assert.equal(translationCalls,before);assert.equal(t.title,'海辺の朝');
+ const now=Date.now(),yesterday=new Date(now-86400000),date=yesterday.toISOString().slice(0,10);response={videos:[{title:'中文标题',content:'中文内容',duration:'10:00',views:500}]};const options={historical:false,from:date,to:date,direction:'旅行',categoryId:'',count:3,allowedCollaborators:[],linkedDealId:'',language:'none'};const generated=await engine.generateVideoDrafts(a,options);assert.equal(generated.length,1);assert.equal(generated[0].comments.length,0);assert.equal(v.loadVideoState().videos.length,0);assert.equal(v.loadVideoState().drafts.length,1);
+ response={comments:Array.from({length:8},(_,i)=>({name:'路人'+i,original:'评论'+i,translated:'评论'+i}))};assert.equal((await engine.generateVideoComments(generated[0],a,st.loadYtbState(),8)).length,8);response={comments:[]};await assert.rejects(()=>engine.generateVideoComments(generated[0],a,st.loadYtbState(),8),/数量/);
+ await assert.rejects(()=>engine.generateVideoDrafts(a,{...options,historical:true,to:'2099-01-01'}),/时间/);
+ console.log('PASS 021: drafts/review, common collaboration records and source deletion, one deal once, bilingual edit branches, initial/extra comments, private scoped multilingual local lookup without AI, explicit frozen shares.');
+})().catch(e=>{console.error(e);process.exitCode=1});

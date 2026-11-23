@@ -1,0 +1,6 @@
+# Make a local signing.properties using YOUR OWN keystore; never commit it.
+# Prefer an absolute path outside this repository.
+storeFile=/absolute/path/to/your-own-release.p12
+storePassword=REPLACE_LOCALLY
+keyAlias=REPLACE_LOCALLY
+keyPassword=REPLACE_LOCALLY

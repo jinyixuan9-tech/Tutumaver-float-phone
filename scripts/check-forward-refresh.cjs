@@ -1,0 +1,7 @@
+const fs=require('fs'),vm=require('vm'),ts=require('typescript'),assert=require('node:assert/strict');
+const source=fs.readFileSync('components/chat/chat-room.tsx','utf8');const handler=source.match(/const onCallBoundary=\(event:Event\)=>\{[^\n]+/)[0];let refreshes=0;
+const box={exports:{},session:{id:'B'},syncMessagesFromStorage:()=>refreshes++,isCallSysMsg:()=>false};vm.runInNewContext(ts.transpileModule(handler+'\nexports.receive=onCallBoundary;', {compilerOptions:{module:ts.ModuleKind.CommonJS,target:99}}).outputText,box);
+box.exports.receive({detail:{message:{sessionId:'B',role:'user',mediaType:'chat_record',mediaData:{forwardRecord:{entries:[{message:{content:'hello'}}]}}}}});assert.equal(refreshes,1,'cached recipient refreshes forwarded snapshot');
+box.exports.receive({detail:{message:{sessionId:'A',mediaType:'chat_record'}}});assert.equal(refreshes,1,'other sessions ignored');box.exports.receive({detail:{message:{sessionId:'B',mediaData:{callEvent:'end'}}}});assert.equal(refreshes,2,'call refresh preserved');box.exports.receive({detail:{message:{sessionId:'B',content:'normal streamed fragment'}}});assert.equal(refreshes,2,'normal streaming behavior unchanged');
+assert(source.includes('mediaType:"chat_record",content:forwardedChatPrompt(forwardDraft),mediaData:{forwardRecord:JSON.parse(JSON.stringify(forwardDraft))}'));
+console.log('PASS: actual cached-chat event handler refreshes only target forwarded snapshot; normal stream and call behavior preserved.');

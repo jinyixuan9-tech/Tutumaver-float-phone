@@ -1,0 +1,15 @@
+const fs=require('fs'),ts=require('typescript'),assert=require('node:assert/strict');
+const m={exports:{}},kv=new Map();let state;
+new Function('require','module','exports',ts.transpileModule(fs.readFileSync('lib/offline-music-state.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(n=>n==='./kv-db'?{kvGet:k=>kv.get(k),kvSet:(k,v)=>kv.set(k,v),registerDynamicPrefix(){}}:n==='./music-control-bridge'?{getMusicControlBridge:()=>({getState:()=>state})}:{},m,m.exports);
+const {saveOfflineStoryMusic,offlineMusicContext}=m.exports;
+assert.equal(offlineMusicContext('s'),'');
+const track={id:'one',title:'所选歌曲',artist:'歌手',lyrics:'[00:00]开头\n[00:10]一\n[00:20]二\n[00:30]三\n[00:40]四\n[00:50]五\n[01:00]六'};
+saveOfflineStoryMusic('s',track);state={currentTrack:track,currentTime:35,duration:70,isPlaying:true,queue:[track,{id:'two',title:'不该传的第二首'}]};
+let text=offlineMusicContext('s');assert(text.includes('前两句：一 / 二'));assert(text.includes('当前位置：三'));assert(text.includes('后两句（尚未播放到）：四 / 五'));assert(text.includes('不要求每轮提音乐'));assert(!text.includes('不该传的第二首'));
+state.currentTime=5;text=offlineMusicContext('s');assert(text.includes('当前位置：开头'));assert(!text.includes('前两句'));
+state.isPlaying=false;text=offlineMusicContext('s');assert(text.includes('暂停中'));assert(text.includes('不必特意播报'));
+state.currentTime=70;assert(offlineMusicContext('s').includes('已到曲末'));
+state.currentTrack={...track,lyrics:'没有时间戳的纯文本'};assert(offlineMusicContext('s').includes('没有可靠的时间同步歌词'));
+state.currentTrack={id:'two',title:'未分享的新歌'};text=offlineMusicContext('s');assert(!text.includes('未分享的新歌'));assert(text.includes('无法确认仍在播放'));
+saveOfflineStoryMusic('s',null);assert.equal(offlineMusicContext('s'),'');
+console.log('PASS one shared song only; current and two neighboring timed lines; beginning/pause/end/missing lyrics/switch/background isolation; natural contextual response instructions');

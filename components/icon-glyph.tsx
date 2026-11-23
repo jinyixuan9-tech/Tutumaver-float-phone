@@ -1,0 +1,129 @@
+import type { IconId } from "@/lib/desktop-config";
+import {
+  mdiCompass,
+  mdiCubeOutline,
+  mdiDice5,
+  mdiFlower,
+  mdiGhost,
+  mdiHeart,
+  mdiLeaf,
+  mdiLightningBolt,
+  mdiPuzzle,
+  mdiRocketLaunch,
+  mdiStar,
+  mdiTeddyBear,
+  mdiCogOutline,
+  mdiMessageProcessing,
+  mdiPhone,
+  mdiBookOpenPageVariant,
+  mdiMusic,
+  mdiBookOpenVariant,
+  mdiMovie,
+  mdiGamepadVariant,
+  mdiPackageVariant,
+  mdiCellphone,
+  mdiShopping,
+  mdiCalendarMonth,
+  mdiMicrophone,
+  mdiMapMarker,
+  mdiCamera,
+  mdiAccountGroup,
+  mdiPalette,
+  mdiDatabase,
+  mdiAccount,
+  mdiHome,
+  mdiHammerWrench,
+  mdiStorefrontOutline,
+} from "@mdi/js";
+
+type IconGlyphProps = {
+  id: IconId;
+  className?: string;
+};
+
+const MDI_PATHS: Record<IconId, string> = {
+  settings: mdiCogOutline,
+  browser: mdiCompass,
+  chat: mdiMessageProcessing,
+  photos: mdiFlower,
+  weverse: mdiAccountGroup,
+  lysn: mdiMessageProcessing,
+  sms: mdiMessageProcessing,
+  phone: mdiPhone,
+  twitter: "M18.9 2H22l-6.78 7.75L23.2 22h-6.25l-4.9-7.42L5.56 22H2.4l8.13-9.29L2 2h6.4l4.43 6.76L18.9 2Zm-1.1 18h1.73L7.4 3.9H5.55L17.8 20Z",
+  theqoo: mdiAccountGroup,
+  question_box: mdiMessageProcessing,
+  diary: mdiBookOpenPageVariant,
+  music: mdiMusic,
+  reading: mdiBookOpenVariant,
+  story: mdiMovie,
+  game: mdiGamepadVariant,
+  appmarket: mdiPackageVariant,
+  xiaohongshu: mdiPackageVariant,
+  checkphone: mdiCellphone,
+  shopping: mdiShopping,
+  calendar: mdiCalendarMonth,
+  worldline: mdiCompass,
+  interview_magazine: mdiMicrophone,
+  mapmode: mdiMapMarker,
+  qa: mdiHammerWrench,
+  novel: mdiBookOpenVariant,
+  moments: mdiCamera,
+  group_chat: mdiAccountGroup,
+  theme: mdiPalette,
+  resources: mdiDatabase,
+  resource_hub: mdiStorefrontOutline,
+  characters: mdiAccount,
+  dwelling: mdiHome,
+};
+
+export function IconGlyph({ id, className }: IconGlyphProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      aria-hidden
+    >
+      <path
+        d={MDI_PATHS[id] || "M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"}
+        fill="var(--c-desktop-icon, #ffffff)"
+        filter="drop-shadow(0 2px 4px rgba(0,0,0,0.1))"
+      />
+    </svg>
+  );
+}
+
+// ===== 无图标自定义 APP 的兜底字形 =====
+// 与内置图标同一套 mdi 风格,按名字哈希稳定选取,只有图形不同、配色跟随桌面主题。
+const CUSTOM_APP_FALLBACK_PATHS = [
+  mdiPuzzle,
+  mdiHeart,
+  mdiFlower,
+  mdiRocketLaunch,
+  mdiDice5,
+  mdiCompass,
+  mdiLightningBolt,
+  mdiLeaf,
+  mdiGhost,
+  mdiStar,
+  mdiCubeOutline,
+  mdiTeddyBear,
+];
+
+export function customAppGlyphPath(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  return CUSTOM_APP_FALLBACK_PATHS[hash % CUSTOM_APP_FALLBACK_PATHS.length];
+}
+
+export function CustomAppGlyph({ seed, className }: { seed: string; className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden>
+      <path
+        d={customAppGlyphPath(seed)}
+        fill="var(--c-desktop-icon, #ffffff)"
+        filter="drop-shadow(0 2px 4px rgba(0,0,0,0.1))"
+      />
+    </svg>
+  );
+}

@@ -1,0 +1,16 @@
+const ts=require('typescript'),fs=require('fs'),assert=require('node:assert/strict'),Module=require('module'),path=require('path');
+process.env.TZ='Asia/Shanghai';
+require.extensions['.ts']=(m,f)=>m._compile(ts.transpileModule(fs.readFileSync(f,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,f);
+const {worldlineLocalTime,worldlineTimeError,worldlineTimeLabel}=require('../lib/worldline-event-time.ts');
+assert.equal(worldlineLocalTime('2026-10-15T06:30:00Z'),'2026-10-15T14:30');
+const start='2026-10-15T14:30',end='2026-10-15T16:00';
+assert.equal(new Date(worldlineLocalTime('2026-10-15T06:30:00Z')).toISOString(),'2026-10-15T06:30:00.000Z','编辑旧事件不发生八小时偏移');
+assert.equal(worldlineTimeError(start),'');assert.equal(worldlineTimeError(start,end),'');
+assert(worldlineTimeError(start,start));assert(worldlineTimeError(end,start));assert(worldlineTimeError(start,''));assert(worldlineTimeError(''));
+assert.equal(worldlineTimeError('2026-10-15T23:30','2026-10-16T01:00'),'');
+assert(worldlineTimeLabel({occurredAt:new Date(start).toISOString(),endsAt:new Date(end).toISOString()}).includes('16:00'));
+assert(worldlineTimeLabel({occurredAt:'2026-10-15T15:30:00Z',endsAt:'2026-10-15T17:00:00Z'}).includes('16'));
+let stored=null;const orig=Module._load;Module._load=function(req,parent,...rest){if(parent?.filename.endsWith('worldline-storage.ts')&&path.basename(req)==='kv-db')return {registerKvMigration(){},kvGet:()=>stored,kvSet:(k,v)=>{stored=v}};return orig.call(this,req,parent,...rest)};
+const store=require('../lib/worldline-storage.ts');const event={id:'e',title:'拍摄',detail:'大家一起拍摄',occurredAt:new Date(start).toISOString(),endsAt:new Date(end).toISOString(),visibility:'public',people:{}};
+const state={activeId:'w',worlds:[{id:'w',name:'测试',archive:[],progressHistory:[],events:[event]}]};store.saveWorldlineState(state);assert.equal(store.loadWorldlineState().worlds[0].events[0].endsAt,event.endsAt);const context=store.worldlineContextForApp('chat',{publicEvents:true});assert(context.includes(event.endsAt)&&context.includes(event.occurredAt));delete event.endsAt;store.saveWorldlineState(state);assert.equal(store.loadWorldlineState().worlds[0].events[0].endsAt,undefined,'旧事件保持单时刻');
+console.log('PASS: 本地时间/UTC往返、单时刻、时间段、跨天、结束校验、存储兼容、公共上下文包含起止时间。');
