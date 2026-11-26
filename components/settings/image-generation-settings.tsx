@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, Fragment, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { AlertCircle, Camera, ChevronDown, Image, Info, Plus, Power, RefreshCw, ScanFace, Sparkles, Trash2, Upload } from "lucide-react";
 import type { ImageGenerationSettings as ImageGenerationSettingsType, NovelAiPreset, OpenAiImagePreset } from "@/lib/settings-types";
 import {
@@ -8,13 +8,9 @@ import {
     DEFAULT_NOVELAI_PRESET,
     loadImageGenerationSettings,
     saveImageGenerationSettings,
-    loadUserIdentities,
-    resolveUserIdentity,
-    USER_IDENTITIES_UPDATED_EVENT,
 } from "@/lib/settings-storage";
 import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
-import type { UserIdentity } from "./user-identity";
 import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "@/lib/chat-asset-storage";
 import {
     fetchImageGenerationModels,
@@ -22,7 +18,6 @@ import {
     filterLikelyImageModels,
     generateImageFromConfiguredApi,
 } from "@/lib/image-generation-service";
-import { isAndroidApp } from "@/lib/android-runtime";
 import { Alert } from "@/components/ui/feedback";
 import { Input, Select, Textarea, Toggle } from "@/components/ui/form";
 import { ConfirmDialog, ContentDialog } from "@/components/ui/modal";
@@ -71,15 +66,16 @@ type Status = { success: boolean; message: string };
 export function ImageGenerationSettings() {
     const [settings, setSettings] = useState<ImageGenerationSettingsType>(DEFAULT_IMAGE_GENERATION_SETTINGS);
     const [characters, setCharacters] = useState<Character[]>([]);
-    const [userIdentities, setUserIdentities] = useState<UserIdentity[]>([]);
     const [referencePreviews, setReferencePreviews] = useState<Record<string, string>>({});
-    const [referenceUploadingId, setReferenceUploadingId] = useState<string | null>(null);
-    const [referenceUploadNotice, setReferenceUploadNotice] = useState<Status | null>(null);
     const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null);
     const [cropCharacterId, setCropCharacterId] = useState<string | null>(null);
     const [cropDraft, setCropDraft] = useState({ x: 0.27, y: 0.12, size: 0.46 });
     const [cropViewport, setCropViewport] = useState({ width: 0, height: 0 });
     const cropContainerRef = useRef<HTMLDivElement | null>(null);
+    // Keep the file input mounted in the DOM. iOS Safari may ignore click() on
+    // a dynamically-created, detached file input, even inside a user gesture.
+    const referenceFileInputRef = useRef<HTMLInputElement | null>(null);
+    const pendingReferenceCharacterIdRef = useRef<string | null>(null);
     const cropDragRef = useRef<{ pointerId: number; startX: number; startY: number; cropX: number; cropY: number } | null>(null);
     const characterListRef = useRef<HTMLDivElement | null>(null);
     const characterScrollDragRef = useRef<{
@@ -150,26 +146,14 @@ export function ImageGenerationSettings() {
         }
         const loadedCharacters = loadCharacters();
         setCharacters(loadedCharacters);
-        const identities = loadUserIdentities();
-        setUserIdentities(identities);
-        const activeUserId = resolveUserIdentity(undefined, "chat")?.id || identities[0]?.id;
-        setSelectedCharacterId(activeUserId ? `user:${activeUserId}` : loadedCharacters[0]?.id || null);
-    }, []);
-
-    useEffect(() => {
-        const refresh = () => setUserIdentities(loadUserIdentities());
-        window.addEventListener(USER_IDENTITIES_UPDATED_EVENT, refresh);
-        return () => window.removeEventListener(USER_IDENTITIES_UPDATED_EVENT, refresh);
+        setSelectedCharacterId(loadedCharacters[0]?.id || null);
     }, []);
 
     useEffect(() => {
         let cancelled = false;
-        const refs = [
-            ...Object.entries(settings.characterReferences || {}),
-            ...Object.entries(settings.userReferences || {}).map(([id, ref]) => [`user:${id}`, ref] as const),
-        ];
-        Promise.all(refs.map(async ([characterId, ref]) => {
-            const dataUrl = ref.assetId ? await getChatImageFromIndexedDB(ref.assetId).catch(() => null) : null;
+        const refs = settings.characterReferences || {};
+        Promise.all(Object.entries(refs).map(async ([characterId, ref]) => {
+            const dataUrl = ref.assetId ? await getChatImageFromIndexedDB(ref.assetId) : null;
             return [characterId, dataUrl] as const;
         })).then(entries => {
             if (cancelled) return;
@@ -180,7 +164,7 @@ export function ImageGenerationSettings() {
             setReferencePreviews(next);
         });
         return () => { cancelled = true; };
-    }, [settings.characterReferences, settings.userReferences]);
+    }, [settings.characterReferences]);
 
     useEffect(() => {
         return () => {
@@ -362,7 +346,7 @@ export function ImageGenerationSettings() {
         setStatus(null);
         setIsTesting(true);
         try {
-            const result = await generateImageFromConfiguredApi({userInitiated:true,
+            const result = await generateImageFromConfiguredApi({
                 description: settings.provider === "novelai"
                     ? "1girl, solo, upper body, white coffee cup on the wooden table, soft window light"
                     : "一张放在桌面上的白色咖啡杯，柔和自然光，真实照片风格",
@@ -379,68 +363,47 @@ export function ImageGenerationSettings() {
         }
     };
 
-    const referenceFor = (targetId: string) => targetId.startsWith("user:")
-        ? settings.userReferences?.[targetId.slice(5)]
-        : settings.characterReferences?.[targetId];
-
-    const updateCharacterReference = (
-        targetId: string,
-        patch: Partial<ImageGenerationSettingsType["characterReferences"][string]>,
-    ) => {
-        const isUser = targetId.startsWith("user:");
-        const id = isUser ? targetId.slice(5) : targetId;
-        if (isUser) {
-            const current = settings.userReferences?.[id];
-            persist({
-                ...settings,
-                userReferences: {
-                    ...(settings.userReferences || {}),
-                    [id]: { ...current, ...patch, updatedAt: Date.now() },
+    const uploadReference = async (characterId: string, file: File) => {
+        const assetId = await saveChatImageToIndexedDB(file);
+        const current = settings.characterReferences?.[characterId];
+        const faceCrop = current?.faceCrop || { x: 0.27, y: 0.12, size: 0.46 };
+        persist({
+            ...settings,
+            characterReferences: {
+                ...(settings.characterReferences || {}),
+                [characterId]: {
+                    ...current,
+                    assetId,
+                    updatedAt: Date.now(),
+                    enabled: true,
+                    faceCrop,
                 },
-            });
-        } else {
-            const current = settings.characterReferences?.[id];
-            persist({
-                ...settings,
-                characterReferences: {
-                    ...(settings.characterReferences || {}),
-                    [id]: { ...current, ...patch, updatedAt: Date.now() },
-                },
-            });
-        }
+            },
+        });
+        setCropDraft(faceCrop);
+        setCropCharacterId(characterId);
     };
 
-    const uploadReference = async (targetId: string, file: File) => {
-        if (referenceUploadingId) return;
-        setReferenceUploadingId(targetId);
-        setReferenceUploadNotice(null);
-        try {
-            if (!file.size) throw new Error("图片文件为空，请重新选择。");
-            if (!file.type.startsWith("image/")) throw new Error("请选择支持的图片文件。");
-            const assetId = await saveChatImageToIndexedDB(file);
-            const savedImage = await getChatImageFromIndexedDB(assetId);
-            if (!savedImage?.startsWith("data:image/")) {
-                throw new Error("参考图未能写入本地图片库，请检查存储空间或更换图片。");
-            }
-            const faceCrop = referenceFor(targetId)?.faceCrop || { x: 0.27, y: 0.12, size: 0.46 };
-            updateCharacterReference(targetId, { assetId, enabled: true, faceCrop });
-            setReferencePreviews(previous => ({ ...previous, [targetId]: savedImage }));
-            setCropDraft(faceCrop);
-            setCropCharacterId(targetId);
-            setReferenceUploadNotice({ success: true, message: "参考图已保存，请确认脸部选区。" });
-        } catch (error) {
-            const detail = error instanceof Error ? error.message : String(error);
-            const message = detail.includes("动图体积超出限制") ? "GIF 参考图需小于 3MB，请更换图片。"
-                : detail.includes("Failed to decode image") ? "无法读取图片格式，请尝试 JPG、PNG 或 WebP。"
-                : detail || "参考图保存失败，请重试。";
-            setReferenceUploadNotice({ success: false, message });
-        } finally {
-            setReferenceUploadingId(null);
-        }
+    const updateCharacterReference = (
+        characterId: string,
+        patch: Partial<ImageGenerationSettingsType["characterReferences"][string]>,
+    ) => {
+        const current = settings.characterReferences?.[characterId];
+        persist({
+            ...settings,
+            characterReferences: {
+                ...(settings.characterReferences || {}),
+                [characterId]: {
+                    ...current,
+                    ...patch,
+                    updatedAt: Date.now(),
+                },
+            },
+        });
     };
 
     const openFaceCrop = (characterId: string) => {
-        const crop = referenceFor(characterId)?.faceCrop || { x: 0.27, y: 0.12, size: 0.46 };
+        const crop = settings.characterReferences?.[characterId]?.faceCrop || { x: 0.27, y: 0.12, size: 0.46 };
         setCropDraft(crop);
         setCropViewport({ width: 0, height: 0 });
         setCropCharacterId(characterId);
@@ -509,12 +472,8 @@ export function ImageGenerationSettings() {
         if (characterScrollDragRef.current?.pointerId === event.pointerId) characterScrollDragRef.current = null;
     };
 
-    const referenceSubjects = [
-        ...userIdentities.map(identity => ({ id: `user:${identity.id}`, name: identity.name, avatar: identity.avatarUrl || "", isUser: true })),
-        ...characters.map(character => ({ id: character.id, name: character.name, avatar: character.avatar, isUser: false })),
-    ];
-    const selectedCharacter = referenceSubjects.find(character => character.id === selectedCharacterId) || null;
-    const selectedReference = selectedCharacter ? referenceFor(selectedCharacter.id) : undefined;
+    const selectedCharacter = characters.find(character => character.id === selectedCharacterId) || null;
+    const selectedReference = selectedCharacter ? settings.characterReferences?.[selectedCharacter.id] : undefined;
     const characterListOverflows = characterScrollMetrics.scrollHeight > characterScrollMetrics.clientHeight + 1;
     const characterScrollThumbPercent = characterListOverflows
         ? Math.max(14, characterScrollMetrics.clientHeight / characterScrollMetrics.scrollHeight * 100)
@@ -526,6 +485,29 @@ export function ImageGenerationSettings() {
 
     return (
         <div className="flex flex-col gap-6 pb-8">
+            <input
+                ref={referenceFileInputRef}
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                tabIndex={-1}
+                aria-label="选择角色参考图"
+                onChange={async (event) => {
+                    const input = event.currentTarget;
+                    const file = input.files?.[0];
+                    const characterId = pendingReferenceCharacterIdRef.current;
+                    // Reset immediately so selecting the same image again still fires change.
+                    input.value = "";
+                    if (!file || !characterId) return;
+                    try {
+                        await uploadReference(characterId, file);
+                    } catch (error) {
+                        setStatus({ success: false, message: error instanceof Error ? error.message : String(error) });
+                    } finally {
+                        pendingReferenceCharacterIdRef.current = null;
+                    }
+                }}
+            />
             <div className="flex items-center">
                 <h2 className="m-0 mx-2 ts-28 font-bold italic leading-none text-black">Image Generation</h2>
             </div>
@@ -537,7 +519,7 @@ export function ImageGenerationSettings() {
                     </span>
                     <span className="settings-tools-menu-copy">
                         <span className="menu-label appearance-menu-item-label">启用生图功能</span>
-                        <span className="menu-desc settings-tools-menu-desc">启用用户主动点击生成图片。AI 需要新图时先显示文字图，生成预览后由你决定是否使用。</span>
+                        <span className="menu-desc settings-tools-menu-desc">允许图片生成 API 被手动操作及已选择「自动生图」的平台调用；是否自动生成由 AI 行为分别控制。</span>
                     </span>
                     <span className="menu-right settings-tools-menu-toggle">
                         <Toggle checked={settings.enabled} onChange={(enabled) => updateSettings({ enabled })} className="settings-toggle-control" />
@@ -559,8 +541,7 @@ export function ImageGenerationSettings() {
                     </Select>
                 </div>
 
-                {isAndroidApp() && <p className="menu-desc">安卓版直接连接当前生图 API，无需填写网站服务地址；请求方式选项只在网页端使用。</p>}
-                {settings.provider === "novelai" && !isAndroidApp() && (
+                {settings.provider === "novelai" && (
                     <div className="flex flex-col gap-1">
                         <label className="menu-desc ml-1">请求方式</label>
                         <Select
@@ -1072,23 +1053,20 @@ export function ImageGenerationSettings() {
                         className="menu-group max-h-[292px] overflow-y-auto overscroll-contain pr-3"
                         onScroll={syncCharacterScrollMetrics}
                     >
-                        {referenceSubjects.length === 0 ? (
+                        {characters.length === 0 ? (
                             <div className="ui-empty py-8">
                                 <Camera size={22} />
                                 <span className="menu-desc">暂无角色。</span>
                             </div>
-                        ) : referenceSubjects.map((character, index) => {
+                        ) : characters.map(character => {
                             const preview = referencePreviews[character.id];
-                            const ref = referenceFor(character.id);
+                            const ref = settings.characterReferences?.[character.id];
                             return (
-                                <Fragment key={character.id}>
-                                    {(index === 0 || index === userIdentities.length) && (
-                                        <div className="menu-desc px-3 py-2 font-medium">{character.isUser ? "用户身份" : "角色"}</div>
-                                    )}
                                 <button
+                                    key={character.id}
                                     type="button"
                                     className={`menu-item w-full text-left ${selectedCharacterId === character.id ? "bg-[var(--c-input)]" : ""}`}
-                                    onClick={() => { setSelectedCharacterId(character.id); setReferenceUploadNotice(null); }}
+                                    onClick={() => setSelectedCharacterId(character.id)}
                                 >
                                     <span className="h-11 w-11 shrink-0 overflow-hidden rounded-xl bg-[var(--c-input)]">
                                         {preview ? (
@@ -1110,7 +1088,6 @@ export function ImageGenerationSettings() {
                                     </span>
                                     <ChevronDown size={16} className={selectedCharacterId === character.id ? "-rotate-90 opacity-70" : "opacity-40"} />
                                 </button>
-                                </Fragment>
                             );
                         })}
                     </div>
@@ -1138,7 +1115,7 @@ export function ImageGenerationSettings() {
                         <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">
                                 <div className="menu-label truncate">{selectedCharacter.name} · 专属生图设定</div>
-                                <div className="menu-desc">{selectedCharacter.isUser ? "按用户身份保存外貌设定，切换配置绑定不会覆盖。" : "只影响这个角色，不会改动角色卡正文。"}</div>
+                                <div className="menu-desc">只影响这个角色，不会改动角色卡正文。</div>
                             </div>
                             {referencePreviews[selectedCharacter.id] && (
                                 <button
@@ -1168,20 +1145,15 @@ export function ImageGenerationSettings() {
                                 <button
                                     type="button"
                                     className="ui-btn ui-btn-soft-action flex-1"
-                                    disabled={Boolean(referenceUploadingId)}
                                     onClick={() => {
-                                        const input = document.createElement("input");
-                                        input.type = "file";
-                                        input.accept = "image/jpeg,image/png,image/webp,image/gif";
-                                        input.onchange = async () => {
-                                            const file = input.files?.[0];
-                                            if (file) await uploadReference(selectedCharacter.id, file);
-                                        };
-                                        input.click();
+                                        // Must be called synchronously from this real user click
+                                        // for iOS Safari to present the system photo picker.
+                                        pendingReferenceCharacterIdRef.current = selectedCharacter.id;
+                                        referenceFileInputRef.current?.click();
                                     }}
                                 >
                                     <Upload size={16} />
-                                    {referenceUploadingId === selectedCharacter.id ? "正在保存…" : referencePreviews[selectedCharacter.id] ? "更换参考图" : "选择参考图"}
+                                    {referencePreviews[selectedCharacter.id] ? "更换参考图" : "选择参考图"}
                                 </button>
                                 {referencePreviews[selectedCharacter.id] && (
                                     <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => openFaceCrop(selectedCharacter.id)}>
@@ -1191,7 +1163,6 @@ export function ImageGenerationSettings() {
                                 )}
                             </div>
                         )}
-                        {referenceUploadNotice && <p role="status" className={referenceUploadNotice.success ? "menu-desc" : "menu-desc text-red-600"}>{referenceUploadNotice.message}</p>}
                     </div>
                 )}
             </div>
